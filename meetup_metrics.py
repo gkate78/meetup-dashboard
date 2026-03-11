@@ -50,13 +50,10 @@ def build_speaker_leaderboard(df):
     if expanded.empty:
         return pd.DataFrame(columns=["Speaker", "Sessions", "Avg Attendance", "Last Session"])
 
-    grouped = (
-        expanded.groupby("Speaker", as_index=False)
-        .agg(
-            Sessions=("Event Title", "count"),
-            Avg_Attendance=("No. of Attendees", "mean"),
-            Last_Session=("Date and Time", "max"),
-        )
+    grouped = expanded.groupby("Speaker", as_index=False).agg(
+        Sessions=("Event Title", "count"),
+        Avg_Attendance=("No. of Attendees", "mean"),
+        Last_Session=("Date and Time", "max"),
     )
 
     grouped["Avg_Attendance"] = grouped["Avg_Attendance"].fillna(0)
@@ -85,7 +82,9 @@ def compute_pulse(member_count, df_up, df_past):
     if df_past is not None and not df_past.empty and "Date and Time" in df_past.columns:
         momentum_df = df_past[["Date and Time", "No. of Attendees"]].copy()
         momentum_df["Date and Time"] = pd.to_datetime(momentum_df["Date and Time"], errors="coerce")
-        momentum_df["No. of Attendees"] = pd.to_numeric(momentum_df["No. of Attendees"], errors="coerce")
+        momentum_df["No. of Attendees"] = pd.to_numeric(
+            momentum_df["No. of Attendees"], errors="coerce"
+        )
         momentum_df = momentum_df.dropna().sort_values("Date and Time")
         sparkline = build_sparkline(momentum_df.tail(10)["No. of Attendees"].tolist())
         if len(momentum_df) >= 6:

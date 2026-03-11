@@ -1,34 +1,40 @@
-import pandas as pd
-import streamlit as st
-import plotly.express as px
 import base64
-import requests
+import html
+import json
+import logging
+import os
+import random
 import re
 import time
-import os
-import json
-import html
-import random
-import logging
 from urllib.parse import urlparse
+
+import pandas as pd
+import plotly.express as px
+import requests
+import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
-from meetup_metrics import safe_metric, build_speaker_leaderboard, compute_pulse
+
+from meetup_metrics import build_speaker_leaderboard, compute_pulse, safe_metric
+
 
 def sanitize_title(title):
     # Remove emojis
     emoji_pattern = re.compile(
         "["
-        "\U0001F600-\U0001F64F"  # emoticons
-        "\U0001F300-\U0001F5FF"  # symbols & pictographs
-        "\U0001F680-\U0001F6FF"  # transport & map symbols
-        "\U0001F1E0-\U0001F1FF"  # flags (iOS)
-        "\U00002700-\U000027BF"  # Dingbats
-        "\U000024C2-\U0001F251"
-        "]+", flags=re.UNICODE)
-    clean = emoji_pattern.sub(r'', str(title))
-    clean = clean.replace('\t', ' ').replace('\n', ' ').strip()
-    clean = clean.replace('[', '\\[').replace(']', '\\]').replace('|', '\\|').replace('`', '\\`')
+        "\U0001f600-\U0001f64f"  # emoticons
+        "\U0001f300-\U0001f5ff"  # symbols & pictographs
+        "\U0001f680-\U0001f6ff"  # transport & map symbols
+        "\U0001f1e0-\U0001f1ff"  # flags (iOS)
+        "\U00002700-\U000027bf"  # Dingbats
+        "\U000024c2-\U0001f251"
+        "]+",
+        flags=re.UNICODE,
+    )
+    clean = emoji_pattern.sub(r"", str(title))
+    clean = clean.replace("\t", " ").replace("\n", " ").strip()
+    clean = clean.replace("[", "\\[").replace("]", "\\]").replace("|", "\\|").replace("`", "\\`")
     return clean
+
 
 # -------------------
 # Config
@@ -51,7 +57,9 @@ RETRY_BASE_SECONDS = float(os.getenv("API_RETRY_BASE_SECONDS", "1.5"))
 
 logger = logging.getLogger("dep_meetup")
 if not logger.handlers:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
 
 MEETUP_TOKEN = os.getenv("MEETUP_TOKEN", "").strip()
 if not MEETUP_TOKEN:
@@ -128,6 +136,7 @@ query getPastGroupEvents($urlname: String!, $first: Int!, $after: String) {
 }
 """
 
+
 def format_speakers(speakers):
     if not speakers:
         return ""
@@ -195,7 +204,7 @@ def load_speaker_overrides(path):
     clean = clean[(clean["event_id"] != "") & (clean["canonical_speakers"] != "")]
     if clean.empty:
         return {}
-    return dict(zip(clean["event_id"], clean["canonical_speakers"]))
+    return dict(zip(clean["event_id"], clean["canonical_speakers"], strict=False))
 
 
 def apply_missing_speaker_overrides(df, overrides):
@@ -206,8 +215,13 @@ def apply_missing_speaker_overrides(df, overrides):
 
     out = df.copy()
     out["Event ID"] = out["Event ID"].astype(str).str.strip()
-    missing_mask = out["Speakers"].fillna("").astype(str).str.strip().str.casefold().isin(
-        {"", "-", "nan", "none", "null", "na", "n/a"}
+    missing_mask = (
+        out["Speakers"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.casefold()
+        .isin({"", "-", "nan", "none", "null", "na", "n/a"})
     )
     mapped = out["Event ID"].map(overrides)
     fill_mask = missing_mask & mapped.notna()
@@ -253,7 +267,9 @@ def gql_request(query, variables):
             r.raise_for_status()
             payload = r.json()
             if payload.get("errors"):
-                st.warning(f"Meetup GraphQL returned errors: {payload['errors'][0].get('message', 'Unknown error')}")
+                st.warning(
+                    f"Meetup GraphQL returned errors: {payload['errors'][0].get('message', 'Unknown error')}"
+                )
             return payload
         except requests.exceptions.HTTPError as e:
             status_code = getattr(e.response, "status_code", None)
@@ -269,15 +285,17 @@ def gql_request(query, variables):
             else:
                 st.error(f"HTTP Error {status_code}: {e}")
             if attempt < MAX_RETRIES - 1:
-                backoff = RETRY_BASE_SECONDS * (2 ** attempt) + random.uniform(0, 0.35)
-                logger.warning("API request failed with HTTP %s. retry_in=%.2fs", status_code, backoff)
+                backoff = RETRY_BASE_SECONDS * (2**attempt) + random.uniform(0, 0.35)
+                logger.warning(
+                    "API request failed with HTTP %s. retry_in=%.2fs", status_code, backoff
+                )
                 time.sleep(backoff)
             else:
                 raise
         except requests.exceptions.RequestException as e:
             st.warning(f"Attempt {attempt+1}/{MAX_RETRIES} failed: {e}")
             if attempt < MAX_RETRIES - 1:
-                backoff = RETRY_BASE_SECONDS * (2 ** attempt) + random.uniform(0, 0.35)
+                backoff = RETRY_BASE_SECONDS * (2**attempt) + random.uniform(0, 0.35)
                 logger.warning("API request exception. retry_in=%.2fs error=%s", backoff, e)
                 time.sleep(backoff)
             else:
@@ -286,6 +304,7 @@ def gql_request(query, variables):
 
 def group_node(payload):
     return payload.get("data", {}).get("groupByUrlname") or {}
+
 
 # -------------------
 # Pagination
@@ -308,6 +327,7 @@ def gql_paginated(query, urlname, page_size):
         after = page_info.get("endCursor", None)
     return all_edges
 
+
 # -------------------
 # Data Loader
 # -------------------
@@ -317,33 +337,60 @@ def load_data(urlname):
     up_data = gql_request(QUERY_UPCOMING, {"urlname": urlname, "first": 20})
     up_edges = group_node(up_data).get("events", {}).get("edges", [])
 
-    df_up = pd.DataFrame([{
-            "Event ID": e["node"]["id"],
-            "Event Title": e["node"]["title"],
-            "Date and Time": e["node"]["dateTime"],
-            "Event URL": e["node"]["eventUrl"],
-            "Online?": e["node"].get("eventType") in ("ONLINE", "HYBRID"),
-            "Speakers": format_speakers(e["node"].get("speakerDetails"))
-        } for e in up_edges]) if up_edges else pd.DataFrame(columns=[
-            "Event ID", "Event Title", "Date and Time", "Event URL", "Online?", "Speakers"
-        ])
+    df_up = (
+        pd.DataFrame(
+            [
+                {
+                    "Event ID": e["node"]["id"],
+                    "Event Title": e["node"]["title"],
+                    "Date and Time": e["node"]["dateTime"],
+                    "Event URL": e["node"]["eventUrl"],
+                    "Online?": e["node"].get("eventType") in ("ONLINE", "HYBRID"),
+                    "Speakers": format_speakers(e["node"].get("speakerDetails")),
+                }
+                for e in up_edges
+            ]
+        )
+        if up_edges
+        else pd.DataFrame(
+            columns=["Event ID", "Event Title", "Date and Time", "Event URL", "Online?", "Speakers"]
+        )
+    )
 
     # --- Past ---
     past_edges = gql_paginated(QUERY_PAST, urlname, page_size=100)
 
-    df_past = pd.DataFrame([{
-            "Event ID": e["node"]["id"],
-            "Event Title": e["node"]["title"],
-            "Date and Time": e["node"]["dateTime"],
-            "Event URL": e["node"]["eventUrl"],
-            "Online?": e["node"].get("eventType") in ("ONLINE", "HYBRID"),
-            "No. of Attendees": (e["node"].get("rsvps") or {}).get("yesCount"),
-            "Speakers": format_speakers(e["node"].get("speakerDetails"))
-        } for e in past_edges]) if past_edges else pd.DataFrame(columns=[
-            "Event ID", "Event Title", "Date and Time", "Event URL", "Online?", "No. of Attendees", "Speakers"
-        ])
+    df_past = (
+        pd.DataFrame(
+            [
+                {
+                    "Event ID": e["node"]["id"],
+                    "Event Title": e["node"]["title"],
+                    "Date and Time": e["node"]["dateTime"],
+                    "Event URL": e["node"]["eventUrl"],
+                    "Online?": e["node"].get("eventType") in ("ONLINE", "HYBRID"),
+                    "No. of Attendees": (e["node"].get("rsvps") or {}).get("yesCount"),
+                    "Speakers": format_speakers(e["node"].get("speakerDetails")),
+                }
+                for e in past_edges
+            ]
+        )
+        if past_edges
+        else pd.DataFrame(
+            columns=[
+                "Event ID",
+                "Event Title",
+                "Date and Time",
+                "Event URL",
+                "Online?",
+                "No. of Attendees",
+                "Speakers",
+            ]
+        )
+    )
 
     return df_up, df_past
+
 
 # -------------------
 # Safe Metric Helper
@@ -371,7 +418,12 @@ def save_snapshot(df_up, df_past, member_count):
     if SNAPSHOT_BACKEND == "s3":
         s3 = _get_s3_client()
         if s3 is not None:
-            s3.put_object(Bucket=SNAPSHOT_S3_BUCKET, Key=SNAPSHOT_S3_KEY, Body=encoded, ContentType="application/json")
+            s3.put_object(
+                Bucket=SNAPSHOT_S3_BUCKET,
+                Key=SNAPSHOT_S3_KEY,
+                Body=encoded,
+                ContentType="application/json",
+            )
             return
         logger.warning("S3 snapshot backend requested but unavailable. Falling back to file.")
 
@@ -398,7 +450,7 @@ def load_snapshot():
     if payload is None:
         if not os.path.exists(SNAPSHOT_PATH):
             return None
-        with open(SNAPSHOT_PATH, "r", encoding="utf-8") as f:
+        with open(SNAPSHOT_PATH, encoding="utf-8") as f:
             payload = json.load(f)
 
     df_up = pd.DataFrame(payload.get("upcoming", []))
@@ -419,7 +471,9 @@ def get_dashboard_data(urlname):
         df_past = normalize_speaker_column(df_past)
         df_past, override_count = apply_missing_speaker_overrides(df_past, overrides)
         member_data = gql_request(QUERY_MEMBERS, {"urlname": urlname})
-        member_count = group_node(member_data).get("stats", {}).get("memberCounts", {}).get("all", 0)
+        member_count = (
+            group_node(member_data).get("stats", {}).get("memberCounts", {}).get("all", 0)
+        )
         try:
             save_snapshot(df_up, df_past, member_count)
         except Exception as snapshot_error:
@@ -451,13 +505,33 @@ def get_dashboard_data(urlname):
             }
         st.error(f"Unable to load live data and no snapshot is available: {e}")
         return {
-            "df_up": pd.DataFrame(columns=["Event ID", "Event Title", "Date and Time", "Event URL", "Online?", "Speakers"]),
-            "df_past": pd.DataFrame(columns=["Event ID", "Event Title", "Date and Time", "Event URL", "Online?", "No. of Attendees", "Speakers"]),
+            "df_up": pd.DataFrame(
+                columns=[
+                    "Event ID",
+                    "Event Title",
+                    "Date and Time",
+                    "Event URL",
+                    "Online?",
+                    "Speakers",
+                ]
+            ),
+            "df_past": pd.DataFrame(
+                columns=[
+                    "Event ID",
+                    "Event Title",
+                    "Date and Time",
+                    "Event URL",
+                    "Online?",
+                    "No. of Attendees",
+                    "Speakers",
+                ]
+            ),
             "member_count": 0,
             "source": "Unavailable",
             "saved_at": None,
             "override_count": 0,
         }
+
 
 # -------------------
 # Main App
@@ -651,7 +725,7 @@ st.markdown(
     </div>
     <div class="header-spacer"></div>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
 # --- Load Data ---
@@ -681,11 +755,14 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.caption(f"Data source: {pulse_source} | Last refresh: {pulse_saved_at or 'n/a'}")
-compact_view = st.toggle("Compact mobile view", value=False, help="Use shorter tables and tighter text for small screens.")
+compact_view = st.toggle(
+    "Compact mobile view",
+    value=False,
+    help="Use shorter tables and tighter text for small screens.",
+)
 
 with st.expander("How Community Pulse Score works"):
-    st.markdown(
-        """
+    st.markdown("""
 The **Community Pulse Score** is a 0-100 health signal for this meetup community.
 
 **Formula**
@@ -701,8 +778,7 @@ The **Community Pulse Score** is a 0-100 health signal for this meetup community
 
 **Important note**
 - This score supports decisions, but it should be read with the detailed KPIs and charts below.
-"""
-    )
+""")
 
 # --- Metrics ---
 st.subheader("KPI Overview")
@@ -758,7 +834,7 @@ if not df_past.empty:
         y="No. of Attendees",
         title="Attendance Trend Over Time",
         markers=True,
-        hover_data={"Event Title": True, "Date and Time": True, "No. of Attendees": True}
+        hover_data={"Event Title": True, "Date and Time": True, "No. of Attendees": True},
     )
     fig_attendance.update_layout(
         template="plotly_white",
@@ -774,7 +850,20 @@ if not df_past.empty:
     monthly = df_past_sorted.copy()
     monthly["Year"] = monthly["Date and Time"].dt.year.astype(str)
     monthly["Month"] = monthly["Date and Time"].dt.strftime("%b")
-    month_order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    month_order = [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+    ]
     monthly["Month"] = pd.Categorical(monthly["Month"], categories=month_order, ordered=True)
     monthly_rollup = (
         monthly.groupby(["Year", "Month"], observed=True)["No. of Attendees"]
@@ -839,7 +928,9 @@ with tab1:
     if not df_up.empty:
         df_up_display = df_up.copy()
         date_fmt = "%b %d, %Y" if compact_view else "%b %d, %Y %I:%M %p"
-        df_up_display["Date and Time"] = pd.to_datetime(df_up_display["Date and Time"]).dt.strftime(date_fmt)
+        df_up_display["Date and Time"] = pd.to_datetime(df_up_display["Date and Time"]).dt.strftime(
+            date_fmt
+        )
         df_up_display["Event Title"] = df_up_display.apply(
             lambda row: format_event_link(row["Event Title"], row["Event URL"]),
             axis=1,
@@ -856,7 +947,9 @@ with tab2:
     if not df_past.empty:
         df_past_display = df_past.copy()
         df_past_display["Date and Time"] = pd.to_datetime(df_past_display["Date and Time"])
-        df_past_display = df_past_display.sort_values("Date and Time", ascending=False).reset_index(drop=True)
+        df_past_display = df_past_display.sort_values("Date and Time", ascending=False).reset_index(
+            drop=True
+        )
         date_fmt = "%b %d, %Y" if compact_view else "%b %d, %Y %I:%M %p"
         df_past_display["Date and Time"] = df_past_display["Date and Time"].dt.strftime(date_fmt)
         df_past_display["Event Title"] = df_past_display.apply(
@@ -866,7 +959,9 @@ with tab2:
         if compact_view:
             df_past_display = df_past_display[["Event Title", "Date and Time", "No. of Attendees"]]
         else:
-            df_past_display = df_past_display.drop(columns=["Event URL", "Event ID"], errors="ignore")
+            df_past_display = df_past_display.drop(
+                columns=["Event URL", "Event ID"], errors="ignore"
+            )
         render_responsive_table(df_past_display, allow_html_columns=["Event Title"])
     else:
         st.info("No past events found.")

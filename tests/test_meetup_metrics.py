@@ -1,6 +1,6 @@
 import pandas as pd
 
-from meetup_metrics import build_speaker_leaderboard, build_sparkline, compute_pulse, safe_metric
+from meetup_metrics import build_sparkline, build_speaker_leaderboard, compute_pulse, safe_metric
 
 
 def test_safe_metric_mean_handles_nan():
@@ -15,9 +15,24 @@ def test_build_sparkline_returns_na_with_insufficient_data():
 def test_build_speaker_leaderboard_sorts_by_sessions_then_attendance():
     df = pd.DataFrame(
         [
-            {"Event Title": "A", "Date and Time": "2025-01-01", "No. of Attendees": 60, "Speakers": "Ana, Ben"},
-            {"Event Title": "B", "Date and Time": "2025-02-01", "No. of Attendees": 40, "Speakers": "Ana"},
-            {"Event Title": "C", "Date and Time": "2025-03-01", "No. of Attendees": 80, "Speakers": "Ben"},
+            {
+                "Event Title": "A",
+                "Date and Time": "2025-01-01",
+                "No. of Attendees": 60,
+                "Speakers": "Ana, Ben",
+            },
+            {
+                "Event Title": "B",
+                "Date and Time": "2025-02-01",
+                "No. of Attendees": 40,
+                "Speakers": "Ana",
+            },
+            {
+                "Event Title": "C",
+                "Date and Time": "2025-03-01",
+                "No. of Attendees": 80,
+                "Speakers": "Ben",
+            },
         ]
     )
     board = build_speaker_leaderboard(df)
@@ -28,11 +43,36 @@ def test_build_speaker_leaderboard_sorts_by_sessions_then_attendance():
 def test_build_speaker_leaderboard_excludes_missing_and_nan_speakers():
     df = pd.DataFrame(
         [
-            {"Event Title": "A", "Date and Time": "2025-01-01", "No. of Attendees": 60, "Speakers": "Ana"},
-            {"Event Title": "B", "Date and Time": "2025-02-01", "No. of Attendees": 40, "Speakers": "nan"},
-            {"Event Title": "C", "Date and Time": "2025-03-01", "No. of Attendees": 80, "Speakers": None},
-            {"Event Title": "D", "Date and Time": "2025-04-01", "No. of Attendees": 50, "Speakers": "-"},
-            {"Event Title": "E", "Date and Time": "2025-05-01", "No. of Attendees": 55, "Speakers": ""},
+            {
+                "Event Title": "A",
+                "Date and Time": "2025-01-01",
+                "No. of Attendees": 60,
+                "Speakers": "Ana",
+            },
+            {
+                "Event Title": "B",
+                "Date and Time": "2025-02-01",
+                "No. of Attendees": 40,
+                "Speakers": "nan",
+            },
+            {
+                "Event Title": "C",
+                "Date and Time": "2025-03-01",
+                "No. of Attendees": 80,
+                "Speakers": None,
+            },
+            {
+                "Event Title": "D",
+                "Date and Time": "2025-04-01",
+                "No. of Attendees": 50,
+                "Speakers": "-",
+            },
+            {
+                "Event Title": "E",
+                "Date and Time": "2025-05-01",
+                "No. of Attendees": 55,
+                "Speakers": "",
+            },
         ]
     )
     board = build_speaker_leaderboard(df)
