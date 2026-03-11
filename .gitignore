@@ -1,8 +1,36 @@
-﻿.venv/
+﻿# Python environments and cache
+.venv/
+venv/
+env/
 __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-cache/
 *.pyc
+*.pyo
+dist/
+build/
+*.egg-info/
+
+# Secrets and credentials
 .streamlit/secrets.toml
+.env
+.env.local
+.env.*.local
+aws_credentials.json
+.aws/
+credentials
+config
+
+# Cache and temporary files
+cache/
+*.json.bak
+*.csv.bak
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
