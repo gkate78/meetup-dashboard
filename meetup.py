@@ -6,7 +6,7 @@ import os
 import random
 import re
 import time
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, urlparse
 
 import pandas as pd
 import plotly.express as px
@@ -62,6 +62,8 @@ if not logger.handlers:
     )
 
 MEETUP_TOKEN = os.getenv("MEETUP_TOKEN", "").strip()
+FEEDBACK_FORM_URL = os.getenv("FEEDBACK_FORM_URL", "https://forms.gle/your-feedback-form").strip()
+FEEDBACK_DATA_PATH = os.getenv("FEEDBACK_DATA_PATH", "data/feedback.csv").strip()
 if not MEETUP_TOKEN:
     try:
         MEETUP_TOKEN = st.secrets["MEETUP_TOKEN"].strip()
@@ -135,6 +137,20 @@ query getPastGroupEvents($urlname: String!, $first: Int!, $after: String) {
   }
 }
 """
+
+
+def load_feedback_data(path):
+    if not os.path.exists(path):
+        return pd.DataFrame(columns=["event_id", "rating", "comment"])
+    try:
+        fb = pd.read_csv(path)
+        fb = fb.rename(columns={"event_id": "event_id", "rating": "rating", "comment": "comment"})
+        if "event_id" not in fb.columns:
+            return pd.DataFrame(columns=["event_id", "rating", "comment"])
+        return fb
+    except Exception as e:
+        logger.warning("Unable to load feedback data: %s", e)
+        return pd.DataFrame(columns=["event_id", "rating", "comment"])
 
 
 def format_speakers(speakers):
@@ -238,6 +254,187 @@ def render_responsive_table(df, allow_html_columns=None):
         safe_df[col] = safe_df[col].apply(lambda v: "" if pd.isna(v) else html.escape(str(v)))
     table_html = safe_df.to_html(index=False, escape=False, classes="dep-table")
     st.markdown(f'<div class="table-wrap">{table_html}</div>', unsafe_allow_html=True)
+
+
+def render_monthly_calendar(
+    df_events, selected_year, selected_month, feedback_df=None, view_mode="grid"
+):
+    import calendar
+
+    if df_events.empty:
+        st.info("No events to display in the community calendar yet.")
+        return
+
+    df = df_events.copy()
+    df["Date"] = pd.to_datetime(df["Date and Time"], errors="coerce").dt.date
+    month_start = pd.Timestamp(selected_year, selected_month, 1).date()
+    month_end = pd.Timestamp(
+        selected_year, selected_month, calendar.monthrange(selected_year, selected_month)[1]
+    ).date()
+    month_df = df[df["Date"].between(month_start, month_end)]
+    month_df = month_df.sort_values(["Date", "Date and Time"])
+
+    # Precompute feedback by event
+    feedback_by_event = {}
+    if (
+        feedback_df is not None
+        and not feedback_df.empty
+        and "event_id" in feedback_df.columns
+        and "rating" in feedback_df.columns
+    ):
+        fb = feedback_df.copy()
+        fb["rating"] = pd.to_numeric(fb["rating"], errors="coerce")
+        fb = fb.dropna(subset=["rating"])
+        feedback_by_event = fb.groupby("event_id", observed=True)["rating"].mean().to_dict()
+
+    events_by_day = (
+        month_df.groupby("Date", observed=True)
+        .apply(lambda d: d.to_dict(orient="records"))
+        .to_dict()
+    )
+
+    if view_mode == "list":
+        st.markdown("### Events List View")
+        for day, events in sorted(events_by_day.items()):
+            st.markdown(f"**{day.strftime('%b %d, %Y')}**")
+            for event in events:
+                title = sanitize_title(event.get("Event Title", "Untitled"))
+                url = event.get("Event URL", "#")
+                typ = event.get("Type", "Past")
+                online = event.get("Online?", False)
+                dt = pd.to_datetime(event.get("Date and Time"), errors="coerce")
+                time_label = dt.strftime("%I:%M %p") if not pd.isna(dt) else "TBD"
+                speaker = sanitize_title(event.get("Speakers", ""))
+                mode = "🌐 Online" if online else "🏢 In-person"
+                event_id = str(event.get("Event ID", "")).strip()
+                feedback_url = ""
+                if FEEDBACK_FORM_URL:
+                    feedback_url = (
+                        f"{FEEDBACK_FORM_URL}?event_id={quote_plus(event_id)}"
+                        f"&title={quote_plus(title)}"
+                    )
+                feedback_badge = ""
+                if event_id in feedback_by_event:
+                    feedback_badge = f" ⭐ {feedback_by_event[event_id]:.1f}"
+                st.markdown(
+                    f"- [{title}]({html.escape(url)}) [{typ}] — {time_label} — {mode} {f'• {speaker}' if speaker else ''}{feedback_badge} "
+                    f"[💬 Feedback]({html.escape(feedback_url)})"
+                )
+        return
+
+    cal = calendar.Calendar(firstweekday=6)
+    month_days = list(cal.monthdatescalendar(selected_year, selected_month))
+
+    day_table = [
+        "<div class='calendar-month-grid'>",
+        "<div class='calendar-row calendar-header'><div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div></div>",
+    ]
+
+    for week in month_days:
+        row_html = "<div class='calendar-row'>"
+        for d in week:
+            cell_class = "calendar-day"
+            day_events_html = ""
+            feedback_note = ""
+            if d.month == selected_month:
+                cell_class = "calendar-day current-month"
+                events = events_by_day.get(d, [])
+                event_feedbacks = []
+                for event in events:
+                    event_id = str(event.get("Event ID", "")).strip()
+                    if event_id in feedback_by_event:
+                        event_feedbacks.append(feedback_by_event[event_id])
+                if event_feedbacks:
+                    feedback_note = f" <span class='calendar-day-feedback'>💬 {sum(event_feedbacks)/len(event_feedbacks):.1f}</span>"
+                if events:
+                    items = []
+                    for event in events:
+                        title = sanitize_title(event.get("Event Title", "Untitled"))
+                        url = event.get("Event URL", "#")
+                        typ = event.get("Type", "Past")
+                        online = event.get("Online?", False)
+                        dt = pd.to_datetime(event.get("Date and Time"), errors="coerce")
+                        time_label = dt.strftime("%I:%M %p") if not pd.isna(dt) else "TBD"
+                        speaker = sanitize_title(event.get("Speakers", ""))
+                        mode = "🌐 Online" if online else "🏢 In-person"
+                        color = "#1d4ed8" if typ == "Upcoming" else "#0f172a"
+                        speaker_line = (
+                            f'<div class="calendar-meta">{html.escape(speaker)}</div>'
+                            if speaker
+                            else ""
+                        )
+                        event_id = str(event.get("Event ID", "")).strip()
+                        feedback_url = ""
+                        if FEEDBACK_FORM_URL:
+                            feedback_url = (
+                                f"{FEEDBACK_FORM_URL}?event_id={quote_plus(event_id)}"
+                                f"&title={quote_plus(title)}"
+                            )
+                        feedback_line = ""
+                        if event_id in feedback_by_event:
+                            feedback_line = f'<div class="calendar-meta">⭐ {feedback_by_event[event_id]:.1f}</div>'
+                        feedback_link = (
+                            f'<div class="calendar-feedback"><a href="{html.escape(feedback_url)}" target="_blank">💬 feedback</a></div>'
+                            if feedback_url
+                            else ""
+                        )
+                        items.append(
+                            f'<div class="calendar-event" style="color:{color};">'
+                            f'<a href="{html.escape(url)}" target="_blank">{html.escape(title)}</a>'
+                            f'<div class="calendar-meta">{html.escape(time_label)} · {mode}</div>'
+                            f"{speaker_line}"
+                            f"{feedback_line}"
+                            f"{feedback_link}"
+                            f"</div>"
+                        )
+                    day_events_html = "".join(items)
+            else:
+                cell_class = "calendar-day other-month"
+
+            row_html += (
+                f'<div class="{cell_class}">'
+                f'<div class="calendar-day-number">{d.day}{feedback_note}</div>'
+                f"{day_events_html}"
+                f"</div>"
+            )
+        row_html += "</div>"
+        day_table.append(row_html)
+
+    day_table.append("</div>")
+    st.markdown(
+        """
+        <style>
+        .calendar-month-grid { display: grid; gap: 8px; margin-bottom: 16px; overflow-x:auto; min-width:100%; }
+        .calendar-row { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap: 8px; }
+        .calendar-header div { background:#1d4ed8; color:#fff; font-weight:700; padding:8px 6px; border-radius:6px; text-align:center; font-size:0.84rem; }
+        .calendar-day { border:1px solid #d7e2f1; border-radius:10px; min-height:110px; padding:8px; background:#fff; font-size:0.8rem; display:flex; flex-direction:column; gap:4px; }
+        .calendar-day.other-month { background:#f8fafc; color:#94a3b8; }
+        .calendar-day.current-month { background:#ffffff; }
+        .calendar-day-number { font-weight:700; margin-bottom:3px; font-size:0.8rem; display:flex; align-items:center; gap:4px; color:#1f2937; }
+        .calendar-day-feedback { font-size:0.72rem; color:#065f46; background:#ecfdf3; padding:1px 4px; border-radius:4px; }
+        .calendar-event { margin-bottom:4px; line-height:1.2rem; max-height:4.8rem; overflow:hidden; border-left:3px solid #1d4ed8; padding-left:4px; }
+        .calendar-event a { color: #1d4ed8; text-decoration:none; font-weight:600; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:0.8rem; }
+        .calendar-meta { font-size:0.7rem; color:#475569; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .calendar-feedback { margin-top:2px; font-size:0.72rem; }
+        .calendar-feedback a { color:#0f172a; text-decoration:none; font-weight:600; }
+        .calendar-feedback a:hover { text-decoration:underline; }
+        @media (max-width: 1200px) {
+            .calendar-row { grid-template-columns: repeat(7, minmax(10rem,1fr)); }
+        }
+        @media (max-width: 900px) {
+            .calendar-row { grid-template-columns: repeat(7, minmax(9rem,1fr)); }
+            .calendar-day { min-height: 120px; }
+            .calendar-event a { white-space: normal; }
+        }
+        @media (max-width: 700px) {
+            .calendar-row { display: block; }
+            .calendar-day { width: 100%; min-height: 110px; }
+        }
+        </style>
+    """,
+        unsafe_allow_html=True,
+    )
+    st.markdown("".join(day_table), unsafe_allow_html=True)
 
 
 def format_event_link(title, url):
@@ -899,6 +1096,79 @@ if not df_past.empty:
     st.plotly_chart(fig_heatmap, use_container_width=True)
 else:
     st.info("No past events available yet for trend and heatmap analytics.")
+
+# --- Monthly Community Calendar ---
+st.subheader("Community Calendar (Month Grid)")
+
+calendar_data = pd.concat(
+    [
+        df_up.assign(Type="Upcoming"),
+        df_past.assign(Type="Past"),
+    ],
+    ignore_index=True,
+)
+calendar_data = calendar_data.dropna(subset=["Date and Time"])
+calendar_data["Date and Time"] = pd.to_datetime(calendar_data["Date and Time"], errors="coerce")
+calendar_data = calendar_data.dropna(subset=["Date and Time"]).sort_values("Date and Time")
+
+if calendar_data.empty:
+    st.info("No events available to render the calendar yet.")
+else:
+    feedback_df = load_feedback_data(FEEDBACK_DATA_PATH)
+    now = pd.Timestamp.now()
+    selected_year, selected_month = st.columns(2)
+    year = selected_year.number_input(
+        "Year", min_value=2000, max_value=2100, value=now.year, step=1
+    )
+    month = selected_month.selectbox(
+        "Month",
+        list(range(1, 13)),
+        index=now.month - 1,
+        format_func=lambda m: pd.Timestamp(year=year, month=m, day=1).strftime("%B"),
+    )
+    view_mode = st.radio("Calendar view", options=["Month Grid", "List"], index=0, horizontal=True)
+    st.markdown(
+        "Use this calendar to quickly inspect upcoming and past meetup events for a given month. "
+        "Click event titles to open Meetup details."
+    )
+    render_monthly_calendar(
+        calendar_data,
+        int(year),
+        int(month),
+        feedback_df=feedback_df,
+        view_mode="list" if view_mode == "List" else "grid",
+    )
+
+    if not feedback_df.empty and "event_id" in feedback_df.columns:
+        feedback_df = feedback_df.copy()
+        feedback_df["rating"] = pd.to_numeric(feedback_df["rating"], errors="coerce")
+        feedback_df = feedback_df.dropna(subset=["rating"])
+        if not feedback_df.empty:
+            event_scores = (
+                feedback_df.groupby("event_id", observed=True)["rating"]
+                .mean()
+                .reset_index(name="avg_rating")
+            )
+            event_scores = event_scores.sort_values("avg_rating", ascending=False)
+            top_feedback = event_scores.head(5)
+            if not top_feedback.empty:
+                st.markdown("### Community Feedback Snapshot")
+                st.markdown(
+                    "This section shows event success from collected feedback ratings (1-5)."
+                )
+                merged = calendar_data.rename(columns={"Event ID": "event_id"}).merge(
+                    top_feedback, on="event_id", how="inner"
+                )
+                merged = merged.loc[:, ["Event Title", "Event URL", "Type", "avg_rating"]].head(5)
+                merged["avg_rating"] = merged["avg_rating"].round(2)
+                merged["Event Title"] = merged.apply(
+                    lambda row: f'<a href="{html.escape(row.get("Event URL", "#"))}" target="_blank">{html.escape(sanitize_title(row["Event Title"]))}</a>',
+                    axis=1,
+                )
+                render_responsive_table(
+                    merged.rename(columns={"avg_rating": "Avg Rating"}).drop(columns=["Event URL"]),
+                    allow_html_columns=["Event Title"],
+                )
 
 st.subheader("Speaker Leaderboard")
 speaker_board = build_speaker_leaderboard(df_past)
