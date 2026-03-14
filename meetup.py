@@ -256,7 +256,9 @@ def render_responsive_table(df, allow_html_columns=None):
     st.markdown(f'<div class="table-wrap">{table_html}</div>', unsafe_allow_html=True)
 
 
-def render_monthly_calendar(df_events, selected_year, selected_month, feedback_df=None, view_mode="grid"):
+def render_monthly_calendar(
+    df_events, selected_year, selected_month, feedback_df=None, view_mode="grid"
+):
     import calendar
 
     if df_events.empty:
@@ -266,19 +268,30 @@ def render_monthly_calendar(df_events, selected_year, selected_month, feedback_d
     df = df_events.copy()
     df["Date"] = pd.to_datetime(df["Date and Time"], errors="coerce").dt.date
     month_start = pd.Timestamp(selected_year, selected_month, 1).date()
-    month_end = pd.Timestamp(selected_year, selected_month, calendar.monthrange(selected_year, selected_month)[1]).date()
+    month_end = pd.Timestamp(
+        selected_year, selected_month, calendar.monthrange(selected_year, selected_month)[1]
+    ).date()
     month_df = df[df["Date"].between(month_start, month_end)]
     month_df = month_df.sort_values(["Date", "Date and Time"])
 
     # Precompute feedback by event
     feedback_by_event = {}
-    if feedback_df is not None and not feedback_df.empty and "event_id" in feedback_df.columns and "rating" in feedback_df.columns:
+    if (
+        feedback_df is not None
+        and not feedback_df.empty
+        and "event_id" in feedback_df.columns
+        and "rating" in feedback_df.columns
+    ):
         fb = feedback_df.copy()
         fb["rating"] = pd.to_numeric(fb["rating"], errors="coerce")
         fb = fb.dropna(subset=["rating"])
         feedback_by_event = fb.groupby("event_id", observed=True)["rating"].mean().to_dict()
 
-    events_by_day = month_df.groupby("Date", observed=True).apply(lambda d: d.to_dict(orient="records")).to_dict()
+    events_by_day = (
+        month_df.groupby("Date", observed=True)
+        .apply(lambda d: d.to_dict(orient="records"))
+        .to_dict()
+    )
 
     if view_mode == "list":
         st.markdown("### Events List View")
@@ -345,7 +358,11 @@ def render_monthly_calendar(df_events, selected_year, selected_month, feedback_d
                         speaker = sanitize_title(event.get("Speakers", ""))
                         mode = "🌐 Online" if online else "🏢 In-person"
                         color = "#1d4ed8" if typ == "Upcoming" else "#0f172a"
-                        speaker_line = f'<div class="calendar-meta">{html.escape(speaker)}</div>' if speaker else ""
+                        speaker_line = (
+                            f'<div class="calendar-meta">{html.escape(speaker)}</div>'
+                            if speaker
+                            else ""
+                        )
                         event_id = str(event.get("Event ID", "")).strip()
                         feedback_url = ""
                         if FEEDBACK_FORM_URL:
@@ -365,26 +382,27 @@ def render_monthly_calendar(df_events, selected_year, selected_month, feedback_d
                             f'<div class="calendar-event" style="color:{color};">'
                             f'<a href="{html.escape(url)}" target="_blank">{html.escape(title)}</a>'
                             f'<div class="calendar-meta">{html.escape(time_label)} · {mode}</div>'
-                            f'{speaker_line}'
-                            f'{feedback_line}'
-                            f'{feedback_link}'
-                            f'</div>'
+                            f"{speaker_line}"
+                            f"{feedback_line}"
+                            f"{feedback_link}"
+                            f"</div>"
                         )
                     day_events_html = "".join(items)
             else:
                 cell_class = "calendar-day other-month"
 
             row_html += (
-                f'<div class="{cell_class}">' 
+                f'<div class="{cell_class}">'
                 f'<div class="calendar-day-number">{d.day}{feedback_note}</div>'
-                f'{day_events_html}'
-                f'</div>'
+                f"{day_events_html}"
+                f"</div>"
             )
         row_html += "</div>"
         day_table.append(row_html)
 
     day_table.append("</div>")
-    st.markdown("""
+    st.markdown(
+        """
         <style>
         .calendar-month-grid { display: grid; gap: 8px; margin-bottom: 16px; overflow-x:auto; min-width:100%; }
         .calendar-row { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap: 8px; }
@@ -413,7 +431,9 @@ def render_monthly_calendar(df_events, selected_year, selected_month, feedback_d
             .calendar-day { width: 100%; min-height: 110px; }
         }
         </style>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
     st.markdown("".join(day_table), unsafe_allow_html=True)
 
 
@@ -1087,7 +1107,7 @@ calendar_data = pd.concat(
     ],
     ignore_index=True,
 )
-calendar_data = calendar_data.dropna(subset=["Date and Time"]) 
+calendar_data = calendar_data.dropna(subset=["Date and Time"])
 calendar_data["Date and Time"] = pd.to_datetime(calendar_data["Date and Time"], errors="coerce")
 calendar_data = calendar_data.dropna(subset=["Date and Time"]).sort_values("Date and Time")
 
@@ -1125,13 +1145,17 @@ else:
         feedback_df = feedback_df.dropna(subset=["rating"])
         if not feedback_df.empty:
             event_scores = (
-                feedback_df.groupby("event_id", observed=True)["rating"].mean().reset_index(name="avg_rating")
+                feedback_df.groupby("event_id", observed=True)["rating"]
+                .mean()
+                .reset_index(name="avg_rating")
             )
             event_scores = event_scores.sort_values("avg_rating", ascending=False)
             top_feedback = event_scores.head(5)
             if not top_feedback.empty:
                 st.markdown("### Community Feedback Snapshot")
-                st.markdown("This section shows event success from collected feedback ratings (1-5).")
+                st.markdown(
+                    "This section shows event success from collected feedback ratings (1-5)."
+                )
                 merged = calendar_data.rename(columns={"Event ID": "event_id"}).merge(
                     top_feedback, on="event_id", how="inner"
                 )
