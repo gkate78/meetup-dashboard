@@ -1,0 +1,37 @@
+.git
+.github
+
+# Python environments and cache
+.venv
+venv
+env
+__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+*.pyc
+*.pyo
+dist
+build
+*.egg-info
+
+# Secrets and credentials (never bake into images)
+.streamlit/secrets.toml
+.env
+.env.*
+aws_credentials.json
+.aws
+
+# Local caches / temp
+cache
+*.json.bak
+*.csv.bak
+
+# IDE/editor
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
