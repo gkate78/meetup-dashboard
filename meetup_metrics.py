@@ -1,5 +1,19 @@
 import pandas as pd
 
+def build_sparkline(values):
+    bars = "▁▂▃▄▅▆▇█"
+    clean = [v for v in values if pd.notna(v)]
+    if len(clean) < 2:
+        return "n/a"
+    low = min(clean)
+    high = max(clean)
+    if high == low:
+        return bars[3] * len(clean)
+    out = []
+    for v in clean:
+        idx = int(((v - low) / (high - low)) * (len(bars) - 1))
+        out.append(bars[idx])
+    return "".join(out)
 
 def safe_metric(series, agg="count"):
     if series is None or series.dropna().empty:
@@ -18,21 +32,6 @@ def safe_metric(series, agg="count"):
 def clamp(value, lower=0, upper=100):
     return max(lower, min(upper, value))
 
-
-def build_sparkline(values):
-    bars = "▁▂▃▄▅▆▇█"
-    clean = [v for v in values if pd.notna(v)]
-    if len(clean) < 2:
-        return "n/a"
-    low = min(clean)
-    high = max(clean)
-    if high == low:
-        return bars[3] * len(clean)
-    out = []
-    for v in clean:
-        idx = int(((v - low) / (high - low)) * (len(bars) - 1))
-        out.append(bars[idx])
-    return "".join(out)
 
 
 def build_speaker_leaderboard(df):
