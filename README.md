@@ -50,6 +50,10 @@ Snapshot backend settings:
 - `SNAPSHOT_S3_BUCKET` (required if backend is `s3`)
 - `SNAPSHOT_S3_KEY` (default `meetup/meetup_snapshot.json`)
 
+Feedback settings:
+- `FEEDBACK_FORM_URL` (default `https://forms.gle/your-feedback-form`)
+- `FEEDBACK_DATA_PATH` (default `data/feedback.csv`)
+
 Speaker overrides for missing past speakers:
 - `SPEAKER_OVERRIDES_PATH` (default `data/speaker_overrides.csv`)
 - Required columns: `event_id`, `canonical_speakers`

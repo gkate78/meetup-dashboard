@@ -6,6 +6,7 @@ import os
 import random
 import re
 import time
+from datetime import datetime
 from urllib.parse import quote_plus, urlparse
 
 import pandas as pd
@@ -179,16 +180,31 @@ query getPastGroupEvents($urlname: String!, $first: Int!, $after: String) {
 
 def load_feedback_data(path):
     if not os.path.exists(path):
-        return pd.DataFrame(columns=["event_id", "rating", "comment"])
+        return pd.DataFrame(columns=["event_id", "event_title", "rating", "comment", "submitted_at"])
     try:
         fb = pd.read_csv(path)
-        fb = fb.rename(columns={"event_id": "event_id", "rating": "rating", "comment": "comment"})
-        if "event_id" not in fb.columns:
-            return pd.DataFrame(columns=["event_id", "rating", "comment"])
+        fb = fb.rename(
+            columns={
+                "event_id": "event_id",
+                "event_title": "event_title",
+                "rating": "rating",
+                "comment": "comment",
+                "submitted_at": "submitted_at",
+            }
+        )
+        if "event_id" not in fb.columns or "rating" not in fb.columns:
+            return pd.DataFrame(columns=["event_id", "event_title", "rating", "comment", "submitted_at"])
         return fb
     except Exception as e:
         logger.warning("Unable to load feedback data: %s", e)
-        return pd.DataFrame(columns=["event_id", "rating", "comment"])
+        return pd.DataFrame(columns=["event_id", "event_title", "rating", "comment", "submitted_at"])
+
+
+def save_feedback_data(path, record):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    df = pd.DataFrame([record])
+    header = not os.path.exists(path)
+    df.to_csv(path, mode="a", index=False, header=header)
 
 
 def format_speakers(speakers):
@@ -828,7 +844,7 @@ if __name__ == "__main__":
 def main():
     st.set_page_config(page_title="DEP Meetup Dashboard", layout="wide")
 
-    if "DEP_PAGE" not in st.session_state:
+    if __name__ == "__main__" or "DEP_PAGE" not in st.session_state:
         st.session_state["DEP_PAGE"] = "all"
         os.environ["DEP_PAGE"] = "all"
 
@@ -844,6 +860,7 @@ def main():
     member_count = dashboard["member_count"]
     pulse_source = dashboard["source"]
     pulse_saved_at = dashboard["saved_at"]
+    feedback_df = load_feedback_data(FEEDBACK_DATA_PATH)
     pulse = compute_pulse(member_count, df_up, df_past)
     logger.info("Dashboard data loaded. source=%s members=%s", pulse_source, member_count)
 
@@ -1040,6 +1057,14 @@ def main():
                 font-size: 1.25rem;
                 margin-top: 0.6rem;
             }}
+            .footer-text {{
+                color: #475569;
+                font-size: 0.9rem;
+                margin: 32px auto 12px auto;
+                max-width: 1100px;
+                text-align: center;
+                opacity: 0.85;
+            }}
             @media (max-width: 768px) {{
                 .header-inner {{
                     align-items: center;
@@ -1146,7 +1171,7 @@ def main():
         key="compact_view",
     )
 
-    def render_meetup_events_section():
+    def render_meetup_events_section(feedback_df=None):
         st.markdown('<div id="events"></div>', unsafe_allow_html=True)
         st.subheader("Meetup Events")
         raw_controls = st.columns(3)
@@ -1249,6 +1274,44 @@ def main():
             else:
                 st.info("No past events found.")
 
+        with st.expander("Submit feedback for an event"):
+            event_list = pd.concat([df_up, df_past], ignore_index=True)
+            event_list = event_list.dropna(subset=["Event ID", "Event Title"]).copy()
+            event_list["Event ID"] = event_list["Event ID"].astype(str).str.strip()
+            event_list["Event Title"] = event_list["Event Title"].apply(sanitize_title)
+            event_map = {
+                row["Event ID"]: row["Event Title"]
+                for _, row in event_list.drop_duplicates(subset=["Event ID"]).iterrows()
+            }
+            event_options = ["-- Select event --"] + [f"{eid} — {title}" for eid, title in event_map.items()]
+            with st.form("feedback_form"):
+                selected_event = st.selectbox(
+                    "Choose event to rate",
+                    options=event_options,
+                    index=0,
+                    key="feedback_event_select",
+                )
+                rating = st.slider("Rating", min_value=1, max_value=5, value=4, step=1)
+                comment = st.text_area("Comments (optional)")
+                submit_feedback = st.form_submit_button("Submit feedback")
+                if submit_feedback:
+                    if selected_event == "-- Select event --":
+                        st.warning("Please select an event before submitting feedback.")
+                    else:
+                        event_id = selected_event.split(" — ", 1)[0]
+                        save_feedback_data(
+                            FEEDBACK_DATA_PATH,
+                            {
+                                "event_id": event_id,
+                                "event_title": event_map.get(event_id, ""),
+                                "rating": int(rating),
+                                "comment": str(comment).strip(),
+                                "submitted_at": datetime.utcnow().isoformat() + "Z",
+                            },
+                        )
+                        st.success("Thank you! Your feedback has been recorded.")
+                        st.experimental_rerun()
+
 
     # --- Insights / Story ---
     if PAGE_VIEW in ("all", "insights"):
@@ -1273,7 +1336,7 @@ def main():
 
     # --- Meetup Events ---
     if PAGE_VIEW == "events":
-        render_meetup_events_section()
+        render_meetup_events_section(feedback_df=feedback_df)
 
     if PAGE_VIEW == "all":
         with st.expander("How Community Pulse Score works"):
@@ -1467,6 +1530,11 @@ def main():
 
     if PAGE_VIEW == "all":
         render_meetup_events_section()
+
+    st.markdown(
+        '<div class="footer-text">Copyright © 2026 Katherine Bulac for Data Engineering Pilipinas Community.</div>',
+        unsafe_allow_html=True,
+    )
 
 if __name__ == "__main__":
     main()
