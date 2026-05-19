@@ -24,6 +24,12 @@ aws_credentials.json
 
 # Local caches / temp
 cache
+past.json
+upcoming.json
+all_events.json
+all_events.csv
+data/feedback.csv
+data/speaker_overrides.csv
 *.json.bak
 *.csv.bak
 

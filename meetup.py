@@ -98,7 +98,7 @@ if not logger.handlers:
     )
 
 MEETUP_TOKEN = os.getenv("MEETUP_TOKEN", "").strip()
-FEEDBACK_FORM_URL = os.getenv("FEEDBACK_FORM_URL", "https://forms.gle/your-feedback-form").strip()
+FEEDBACK_FORM_URL = os.getenv("FEEDBACK_FORM_URL", "").strip()
 FEEDBACK_DATA_PATH = os.getenv("FEEDBACK_DATA_PATH", "data/feedback.csv").strip()
 if not MEETUP_TOKEN:
     try:
@@ -179,10 +179,13 @@ query getPastGroupEvents($urlname: String!, $first: Int!, $after: String) {
 
 
 def load_feedback_data(path):
+    columns = ["event_id", "event_title", "rating", "comment", "submitted_at"]
     if not os.path.exists(path):
-        return pd.DataFrame(columns=["event_id", "event_title", "rating", "comment", "submitted_at"])
+        return pd.DataFrame(columns=columns)
     try:
         fb = pd.read_csv(path)
+        if "event_id" not in fb.columns or "rating" not in fb.columns:
+            fb = pd.read_csv(path, header=None, names=columns)
         fb = fb.rename(
             columns={
                 "event_id": "event_id",
@@ -193,17 +196,18 @@ def load_feedback_data(path):
             }
         )
         if "event_id" not in fb.columns or "rating" not in fb.columns:
-            return pd.DataFrame(columns=["event_id", "event_title", "rating", "comment", "submitted_at"])
+            return pd.DataFrame(columns=columns)
+        fb["event_id"] = fb["event_id"].astype(str).str.strip()
         return fb
     except Exception as e:
         logger.warning("Unable to load feedback data: %s", e)
-        return pd.DataFrame(columns=["event_id", "event_title", "rating", "comment", "submitted_at"])
+        return pd.DataFrame(columns=columns)
 
 
 def save_feedback_data(path, record):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     df = pd.DataFrame([record])
-    header = not os.path.exists(path)
+    header = not os.path.exists(path) or os.path.getsize(path) == 0
     df.to_csv(path, mode="a", index=False, header=header)
 
 
@@ -1179,6 +1183,15 @@ def main():
         raw_month = raw_controls[1]
         raw_reset = raw_controls[2]
 
+        feedback_by_event = {}
+        feedback_counts = {}
+        if feedback_df is not None and not feedback_df.empty:
+            fb = feedback_df.copy()
+            fb["rating"] = pd.to_numeric(fb["rating"], errors="coerce")
+            fb = fb.dropna(subset=["rating"])
+            feedback_by_event = fb.groupby("event_id", observed=True)["rating"].mean().round(1).to_dict()
+            feedback_counts = fb.groupby("event_id", observed=True).size().to_dict()
+
         raw_all = pd.concat([df_up, df_past], ignore_index=True)
         raw_all["Date and Time"] = pd.to_datetime(raw_all.get("Date and Time"), errors="coerce")
         raw_all = raw_all.dropna(subset=["Date and Time"])
@@ -1232,10 +1245,17 @@ def main():
                     lambda row: format_event_link(row["Event Title"], row["Event URL"]),
                     axis=1,
                 )
-                df_up_display["Feedback"] = df_up_display.apply(
-                    lambda row: format_feedback_link(row.get("Event ID", ""), row.get("Event Title", "")),
-                    axis=1,
-                )
+                def _event_feedback_cell(row):
+                    event_id = str(row.get("Event ID", "")).strip()
+                    link = format_feedback_link(event_id, row.get("Event Title", ""))
+                    if event_id in feedback_by_event:
+                        avg_rating = feedback_by_event[event_id]
+                        count = feedback_counts.get(event_id, 0)
+                        count_label = f" ({count})" if count > 1 else ""
+                        return f"{link} ⭐ {avg_rating:.1f}{count_label}"
+                    return link
+
+                df_up_display["Feedback"] = df_up_display.apply(_event_feedback_cell, axis=1)
                 if compact_view:
                     df_up_display = df_up_display[["Event Title", "Date and Time", "Feedback"]]
                 else:
@@ -1258,10 +1278,17 @@ def main():
                     lambda row: format_event_link(row["Event Title"], row["Event URL"]),
                     axis=1,
                 )
-                df_past_display["Feedback"] = df_past_display.apply(
-                    lambda row: format_feedback_link(row.get("Event ID", ""), row.get("Event Title", "")),
-                    axis=1,
-                )
+                def _event_feedback_cell(row):
+                    event_id = str(row.get("Event ID", "")).strip()
+                    link = format_feedback_link(event_id, row.get("Event Title", ""))
+                    if event_id in feedback_by_event:
+                        avg_rating = feedback_by_event[event_id]
+                        count = feedback_counts.get(event_id, 0)
+                        count_label = f" ({count})" if count > 1 else ""
+                        return f"{link} ⭐ {avg_rating:.1f}{count_label}"
+                    return link
+
+                df_past_display["Feedback"] = df_past_display.apply(_event_feedback_cell, axis=1)
                 if compact_view:
                     df_past_display = df_past_display[
                         ["Event Title", "Date and Time", "No. of Attendees", "Feedback"]
@@ -1283,7 +1310,21 @@ def main():
                 row["Event ID"]: row["Event Title"]
                 for _, row in event_list.drop_duplicates(subset=["Event ID"]).iterrows()
             }
+            if feedback_by_event:
+                total_ratings = len(feedback_df)
+                avg_score = feedback_df["rating"].astype(float).mean()
+                st.markdown(
+                    f"<div style='margin-bottom:8px;'>Existing feedback: {total_ratings} rating{'s' if total_ratings != 1 else ''} submitted, average score {avg_score:.1f}</div>",
+                    unsafe_allow_html=True,
+                )
             event_options = ["-- Select event --"] + [f"{eid} — {title}" for eid, title in event_map.items()]
+            star_options = [
+                "⭐☆☆☆☆ (1)",
+                "⭐⭐☆☆☆ (2)",
+                "⭐⭐⭐☆☆ (3)",
+                "⭐⭐⭐⭐☆ (4)",
+                "⭐⭐⭐⭐⭐ (5)",
+            ]
             with st.form("feedback_form"):
                 selected_event = st.selectbox(
                     "Choose event to rate",
@@ -1291,7 +1332,13 @@ def main():
                     index=0,
                     key="feedback_event_select",
                 )
-                rating = st.slider("Rating", min_value=1, max_value=5, value=4, step=1)
+                selected_rating = st.selectbox(
+                    "Rating",
+                    options=star_options,
+                    index=3,
+                    key="feedback_star_rating",
+                )
+                rating = selected_rating.count("⭐")
                 comment = st.text_area("Comments (optional)")
                 submit_feedback = st.form_submit_button("Submit feedback")
                 if submit_feedback:
@@ -1299,18 +1346,51 @@ def main():
                         st.warning("Please select an event before submitting feedback.")
                     else:
                         event_id = selected_event.split(" — ", 1)[0]
-                        save_feedback_data(
-                            FEEDBACK_DATA_PATH,
-                            {
-                                "event_id": event_id,
-                                "event_title": event_map.get(event_id, ""),
-                                "rating": int(rating),
-                                "comment": str(comment).strip(),
-                                "submitted_at": datetime.utcnow().isoformat() + "Z",
-                            },
-                        )
-                        st.success("Thank you! Your feedback has been recorded.")
-                        st.experimental_rerun()
+                        if event_id in feedback_by_event:
+                            st.warning(
+                                "Feedback is already submitted for this event. "
+                                "Only one response per event is allowed."
+                            )
+                        else:
+                            save_feedback_data(
+                                FEEDBACK_DATA_PATH,
+                                {
+                                    "event_id": event_id,
+                                    "event_title": event_map.get(event_id, ""),
+                                    "rating": int(rating),
+                                    "comment": str(comment).strip(),
+                                    "submitted_at": datetime.utcnow().isoformat() + "Z",
+                                },
+                            )
+                            st.success("Thank you! Your feedback has been recorded.")
+
+    def render_feedback_page(feedback_df=None):
+        st.markdown('<div id="feedback"></div>', unsafe_allow_html=True)
+        st.subheader("Community Feedback")
+        if feedback_df is None or feedback_df.empty:
+            st.info("No feedback has been submitted yet.")
+            return
+
+        fb = feedback_df.copy()
+        fb["rating"] = pd.to_numeric(fb["rating"], errors="coerce")
+        fb["submitted_at"] = pd.to_datetime(fb["submitted_at"], errors="coerce")
+        fb = fb.sort_values("submitted_at", ascending=False)
+
+        average_rating = fb["rating"].mean()
+        total_feedback = len(fb)
+        unique_events = fb["event_id"].nunique()
+
+        st.markdown(
+            f"<div style='margin-bottom:10px;'>"
+            f"<strong>{total_feedback}</strong> feedback entries received across "
+            f"<strong>{unique_events}</strong> events — average score <strong>{average_rating:.1f}</strong>."
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+        display_df = fb["event_id event_title rating comment submitted_at".split()].copy()
+        display_df["submitted_at"] = display_df["submitted_at"].dt.strftime("%Y-%m-%d %H:%M UTC").fillna("")
+        render_responsive_table(display_df)
 
 
     # --- Insights / Story ---
@@ -1337,6 +1417,9 @@ def main():
     # --- Meetup Events ---
     if PAGE_VIEW == "events":
         render_meetup_events_section(feedback_df=feedback_df)
+
+    if PAGE_VIEW == "feedback":
+        render_feedback_page(feedback_df=feedback_df)
 
     if PAGE_VIEW == "all":
         with st.expander("How Community Pulse Score works"):

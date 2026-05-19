@@ -5,6 +5,7 @@ Streamlit analytics app for Data Engineering Pilipinas Meetup data, powered by M
 ## What this app does
 - Pulls upcoming and past events from Meetup GraphQL.
 - Tracks attendance trends, monthly heatmap, KPI metrics, and speaker leaderboard.
+- Includes a community feedback page with runtime feedback storage.
 - Computes a weighted `Community Pulse Score` for quick health monitoring.
 - Uses resilient data loading with retries and snapshot fallback.
 - Normalizes speaker names and excludes missing placeholders (for example: `nan`, `none`, `null`, `-`) from ranking.
@@ -51,7 +52,7 @@ Snapshot backend settings:
 - `SNAPSHOT_S3_KEY` (default `meetup/meetup_snapshot.json`)
 
 Feedback settings:
-- `FEEDBACK_FORM_URL` (default `https://forms.gle/your-feedback-form`)
+- `FEEDBACK_FORM_URL` (default empty)
 - `FEEDBACK_DATA_PATH` (default `data/feedback.csv`)
 
 Speaker overrides for missing past speakers:
@@ -67,6 +68,14 @@ Speaker overrides for missing past speakers:
 2. In Streamlit Cloud, create app with main file: `meetup.py`.
 3. Add secret `MEETUP_TOKEN` in app settings.
 4. (Optional) Add env vars for S3 snapshot backend.
+
+### Dokploy
+Mount persistent storage for the runtime CSVs and point the app at those paths:
+
+- `FEEDBACK_DATA_PATH` -> mounted feedback CSV
+- `SPEAKER_OVERRIDES_PATH` -> mounted speaker overrides CSV
+
+Keep `FEEDBACK_FORM_URL` empty if you want only the in-app feedback page.
 
 ### Health checks before go-live
 1. Launch app and verify `Data source: Live API` in the caption.
@@ -96,6 +105,7 @@ pytest -q
 meetup.py                  # Streamlit app UI + data loading
 meetup_metrics.py          # Analytics functions (testable core)
 fetch_snapshot.py          # Scheduled snapshot fetch helper
+pages/06_Feedback.py       # Dedicated Feedback page entrypoint
 tests/test_meetup_metrics.py
 .github/workflows/ci.yml
 .github/workflows/snapshot.yml

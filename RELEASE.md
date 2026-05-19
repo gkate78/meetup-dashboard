@@ -36,8 +36,9 @@ pytest -q
 ## 4) Commit and push
 
 ```powershell
-git add meetup.py meetup_metrics.py tests/test_meetup_metrics.py README.md RELEASE.md
-git commit -m "Fix speaker ranking and missing speaker handling; update docs"
+git rm --cached past.json
+git add meetup.py pages/06_Feedback.py README.md CALENDAR_FEATURES.md RELEASE.md .gitignore .dockerignore
+git commit -m "Add in-app feedback page and keep feedback data out of git"
 git push -u origin main
 ```
 
@@ -57,6 +58,8 @@ git push -u origin main
    - `API_MAX_RETRIES`
    - `API_RETRY_BASE_SECONDS`
    - `SPEAKER_OVERRIDES_PATH`
+   - `FEEDBACK_DATA_PATH`
+   - `FEEDBACK_FORM_URL`
 
 ## 6) Post-deploy smoke tests
 
@@ -65,6 +68,8 @@ git push -u origin main
 3. Confirm missing speaker names appear blank in event tables.
 4. Confirm event links open correctly.
 5. Confirm charts and tables render on desktop and mobile.
+6. Confirm the feedback CSV is stored on persistent deployment storage, not in git.
+7. Confirm the speaker overrides CSV is stored on persistent deployment storage, not in git.
 
 ## 7) Rollback option
 
