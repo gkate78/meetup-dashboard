@@ -12,4 +12,4 @@ except Exception:
     pass
 
 import meetup  # noqa: F401
-importlib.reload(meetup)
+meetup.main()

@@ -66,11 +66,6 @@ def get_viewport_width():
 # -------------------
 # Config
 # -------------------
-st.set_page_config(page_title="DEP Meetup Dashboard", layout="wide")
-
-if __name__ == "__main__":
-    st.session_state["DEP_PAGE"] = "all"
-    os.environ["DEP_PAGE"] = "all"
 
 API_URL = "https://api.meetup.com/gql-ext"
 URLNAME = "data-engineering-pilipinas"
@@ -90,6 +85,10 @@ PAGE_VIEW = (
     if "DEP_PAGE" in st.session_state
     else os.getenv("DEP_PAGE", "all")
 ).strip().lower()
+
+# How long to cache dashboard data (seconds). Increase to reduce API calls.
+# Default to 24 hours since the meetup data doesn't change frequently.
+DATA_TTL_SECONDS = int(os.getenv("DATA_TTL_SECONDS", "86400"))
 
 logger = logging.getLogger("dep_meetup")
 if not logger.handlers:
@@ -736,6 +735,7 @@ def load_snapshot():
     }
 
 
+@st.cache_data(ttl=DATA_TTL_SECONDS, show_spinner=False)
 def get_dashboard_data(urlname):
     overrides = load_speaker_overrides(SPEAKER_OVERRIDES_PATH)
     try:
@@ -825,281 +825,435 @@ if __name__ == "__main__":
     except Exception as e:
         logger.warning("Sidebar logo render failed: %s", e)
 
-# --- Load Data ---
-dashboard = get_dashboard_data(URLNAME)
-df_up = dashboard["df_up"]
-df_past = dashboard["df_past"]
-member_count = dashboard["member_count"]
-pulse_source = dashboard["source"]
-pulse_saved_at = dashboard["saved_at"]
-pulse = compute_pulse(member_count, df_up, df_past)
-logger.info("Dashboard data loaded. source=%s members=%s", pulse_source, member_count)
+def main():
+    st.set_page_config(page_title="DEP Meetup Dashboard", layout="wide")
 
-st.markdown(
-    f"""
-    <style>
-        :root {{
-            --header-height: 128px;
-        }}
-        .stApp {{
-            background: radial-gradient(circle at 15% 0%, #eaf2ff 0%, #f8fbff 45%, #f3f7fc 100%);
-        }}
-        div[data-testid="stSidebarNav"] li:first-child a {{
-            position: relative;
-        }}
-        div[data-testid="stSidebarNav"] li:first-child a span {{
-            opacity: 0;
-        }}
-        div[data-testid="stSidebarNav"] li:first-child a::after {{
-            content: "Homepage";
-            position: absolute;
-            left: 0;
-            top: 0;
-            color: inherit;
-        }}
-        html {{
-            scroll-padding-top: 140px;
-        }}
-        .header-container {{
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 12px;
-            padding: 8px 16px 8px 16px;
-            max-width: 1100px;
-            margin: 0 auto;
-        }}
-        .header-inner {{
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            width: 100%;
-        }}
-        .header-left {{
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            min-width: 320px;
-        }}
-        .mobile-logo {{
-            display: none;
-        }}
-        .header-bar {{
-            position: sticky;
-            top: 0;
-            z-index: 1200;
-            background: radial-gradient(circle at 15% 0%, #eaf2ff 0%, #f8fbff 45%, #f3f7fc 100%);
-            backdrop-filter: blur(2px);
-            border-bottom: 1px solid #d7e2f1;
-            box-shadow: 0 6px 12px rgba(15, 23, 42, 0.08);
-            padding: 6px 0 6px 0;
-        }}
-        .header-spacer {{
-            height: var(--header-height);
-        }}
-        .header-logo {{
-            height: 3rem;
-            width: auto;
-            max-height: none;
-            display: block;
-            margin: 0;
-            border-radius: 10px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.08);
-        }}
-        .header-title-wrap {{
-            display: flex;
-            flex-direction: column;
-            text-align: left;
-            margin-left: 6px;
-        }}
-        .header-title {{
-            font-size: 1.4rem;
-            font-weight: 800;
-            color: #0f172a;
-            letter-spacing: 0.2px;
-            margin: 0;
-            line-height: 1.1;
-        }}
-        .header-subtitle {{
-            color: #334155;
-            margin-top: 2px;
-            font-size: 0.8rem;
-            margin: 0;
-        }}
-        .pulse-wrap {{
-            margin: 4px 0 18px 0;
-            background: linear-gradient(120deg, #0f172a 0%, #1d4ed8 55%, #0ea5e9 100%);
-            color: #f8fafc;
-            border-radius: 16px;
-            padding: 16px 18px;
-            box-shadow: 0 12px 24px rgba(15, 23, 42, 0.2);
-        }}
-        .pulse-title {{
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 1.1px;
-            opacity: 0.9;
-        }}
-        .pulse-main {{
-            display: flex;
-            align-items: baseline;
-            gap: 10px;
-            margin-top: 2px;
-        }}
-        .pulse-score {{
-            font-size: 2.5rem;
-            font-weight: 800;
-            line-height: 1;
-        }}
-        .pulse-label {{
-            font-size: 1rem;
-            font-weight: 600;
-            opacity: 0.95;
-        }}
-        .pulse-meta {{
-            margin-top: 10px;
-            font-size: 0.88rem;
-            opacity: 0.95;
-        }}
-        .pulse-spark {{
-            margin-top: 10px;
-            font-family: "Consolas", "Courier New", monospace;
-            font-size: 1.15rem;
-            letter-spacing: 1.2px;
-            opacity: 0.98;
-        }}
-        .leader-card {{
-            background: #ffffff;
-            border: 1px solid #d7e2f1;
-            border-radius: 12px;
-            padding: 12px 14px;
-            box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
-            margin-bottom: 10px;
-        }}
-        .leader-rank {{
-            font-size: 0.8rem;
-            color: #64748b;
-            text-transform: uppercase;
-            margin-bottom: 4px;
-        }}
-        .leader-name {{
-            font-size: 1.03rem;
-            color: #0f172a;
-            font-weight: 700;
-            margin-bottom: 3px;
-        }}
-        .leader-count {{
-            font-size: 0.9rem;
-            color: #1e293b;
-        }}
-        .table-wrap {{
-            width: 100%;
-            overflow-x: auto;
-            border: 1px solid #d7e2f1;
-            border-radius: 10px;
-            background: #ffffff;
-        }}
-        .dep-table {{
-            width: 100%;
-            border-collapse: collapse;
-            table-layout: auto;
-            font-size: 0.93rem;
-        }}
-        .dep-table th {{
-            background: #f8fbff;
-            color: #0f172a;
-            text-align: left;
-            padding: 10px 12px;
-            border-bottom: 1px solid #d7e2f1;
-            white-space: nowrap;
-        }}
-        .dep-table td {{
-            padding: 10px 12px;
-            border-bottom: 1px solid #eef3fa;
-            vertical-align: top;
-            white-space: normal;
-            word-break: break-word;
-        }}
-        .dep-table tr:last-child td {{
-            border-bottom: none;
-        }}
-        h2, .stSubheader {{
-            font-size: 1.25rem;
-            margin-top: 0.6rem;
-        }}
-        @media (max-width: 768px) {{
-            .header-inner {{
-                align-items: center;
-                flex-wrap: wrap;
-                justify-content: center;
+    if "DEP_PAGE" not in st.session_state:
+        st.session_state["DEP_PAGE"] = "all"
+        os.environ["DEP_PAGE"] = "all"
+
+    PAGE_VIEW = (
+        st.session_state.get("DEP_PAGE")
+        if "DEP_PAGE" in st.session_state
+        else os.getenv("DEP_PAGE", "all")
+    ).strip().lower()
+
+    dashboard = get_dashboard_data(URLNAME)
+    df_up = dashboard["df_up"]
+    df_past = dashboard["df_past"]
+    member_count = dashboard["member_count"]
+    pulse_source = dashboard["source"]
+    pulse_saved_at = dashboard["saved_at"]
+    pulse = compute_pulse(member_count, df_up, df_past)
+    logger.info("Dashboard data loaded. source=%s members=%s", pulse_source, member_count)
+
+    st.markdown(
+        f"""
+        <style>
+            :root {{
+                --header-height: 128px;
+            }}
+            .stApp {{
+                background: radial-gradient(circle at 15% 0%, #eaf2ff 0%, #f8fbff 45%, #f3f7fc 100%);
+            }}
+            div[data-testid="stSidebarNav"] li:first-child a {{
+                position: relative;
+            }}
+            div[data-testid="stSidebarNav"] li:first-child a span {{
+                opacity: 0;
+            }}
+            div[data-testid="stSidebarNav"] li:first-child a::after {{
+                content: "Homepage";
+                position: absolute;
+                left: 0;
+                top: 0;
+                color: inherit;
+            }}
+            html {{
+                scroll-padding-top: 140px;
             }}
             .header-container {{
-                flex-direction: column;
+                display: flex;
                 align-items: center;
-                text-align: center;
+                justify-content: center;
+                gap: 12px;
+                padding: 8px 16px 8px 16px;
+                max-width: 1100px;
+                margin: 0 auto;
             }}
-            .header-title-wrap {{
-                text-align: center;
-                margin-left: 0;
+            .header-inner {{
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                width: 100%;
             }}
-            .header-title {{
-                font-size: 1.45rem;
-            }}
-            .header-subtitle {{
-                font-size: 0.9rem;
+            .header-left {{
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                min-width: 320px;
             }}
             .mobile-logo {{
-                display: block;
-                height: 2.6rem;
+                display: none;
+            }}
+            .header-bar {{
+                position: sticky;
+                top: 0;
+                z-index: 1200;
+                background: radial-gradient(circle at 15% 0%, #eaf2ff 0%, #f8fbff 45%, #f3f7fc 100%);
+                backdrop-filter: blur(2px);
+                border-bottom: 1px solid #d7e2f1;
+                box-shadow: 0 6px 12px rgba(15, 23, 42, 0.08);
+                padding: 6px 0 6px 0;
+            }}
+            .header-spacer {{
+                height: var(--header-height);
+            }}
+            .header-logo {{
+                height: 3rem;
                 width: auto;
-                border-radius: 8px;
-                box-shadow: 0 3px 8px rgba(15, 23, 42, 0.15);
+                max-height: none;
+                display: block;
+                margin: 0;
+                border-radius: 10px;
+                box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+            }}
+            .header-title-wrap {{
+                display: flex;
+                flex-direction: column;
+                text-align: left;
+                margin-left: 6px;
+            }}
+            .header-title {{
+                font-size: 1.4rem;
+                font-weight: 800;
+                color: #0f172a;
+                letter-spacing: 0.2px;
+                margin: 0;
+                line-height: 1.1;
+            }}
+            .header-subtitle {{
+                color: #334155;
+                margin-top: 2px;
+                font-size: 0.8rem;
+                margin: 0;
+            }}
+            .pulse-wrap {{
+                margin: 4px 0 18px 0;
+                background: linear-gradient(120deg, #0f172a 0%, #1d4ed8 55%, #0ea5e9 100%);
+                color: #f8fafc;
+                border-radius: 16px;
+                padding: 16px 18px;
+                box-shadow: 0 12px 24px rgba(15, 23, 42, 0.2);
+            }}
+            .pulse-title {{
+                font-size: 0.85rem;
+                text-transform: uppercase;
+                letter-spacing: 1.1px;
+                opacity: 0.9;
+            }}
+            .pulse-main {{
+                display: flex;
+                align-items: baseline;
+                gap: 10px;
+                margin-top: 2px;
             }}
             .pulse-score {{
-                font-size: 2rem;
+                font-size: 2.5rem;
+                font-weight: 800;
+                line-height: 1;
+            }}
+            .pulse-label {{
+                font-size: 1rem;
+                font-weight: 600;
+                opacity: 0.95;
             }}
             .pulse-meta {{
-                font-size: 0.8rem;
+                margin-top: 10px;
+                font-size: 0.88rem;
+                opacity: 0.95;
             }}
             .pulse-spark {{
-                font-size: 0.95rem;
-                letter-spacing: 0.8px;
+                margin-top: 10px;
+                font-family: "Consolas", "Courier New", monospace;
+                font-size: 1.15rem;
+                letter-spacing: 1.2px;
+                opacity: 0.98;
+            }}
+            .leader-card {{
+                background: #ffffff;
+                border: 1px solid #d7e2f1;
+                border-radius: 12px;
+                padding: 12px 14px;
+                box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+                margin-bottom: 10px;
+            }}
+            .leader-rank {{
+                font-size: 0.8rem;
+                color: #64748b;
+                text-transform: uppercase;
+                margin-bottom: 4px;
+            }}
+            .leader-name {{
+                font-size: 1.03rem;
+                color: #0f172a;
+                font-weight: 700;
+                margin-bottom: 3px;
+            }}
+            .leader-count {{
+                font-size: 0.9rem;
+                color: #1e293b;
+            }}
+            .table-wrap {{
+                width: 100%;
+                overflow-x: auto;
+                border: 1px solid #d7e2f1;
+                border-radius: 10px;
+                background: #ffffff;
             }}
             .dep-table {{
-                font-size: 0.85rem;
+                width: 100%;
+                border-collapse: collapse;
+                table-layout: auto;
+                font-size: 0.93rem;
             }}
-            .dep-table th, .dep-table td {{
-                padding: 8px 9px;
+            .dep-table th {{
+                background: #f8fbff;
+                color: #0f172a;
+                text-align: left;
+                padding: 10px 12px;
+                border-bottom: 1px solid #d7e2f1;
+                white-space: nowrap;
             }}
-        }}
-    </style>
+            .dep-table td {{
+                padding: 10px 12px;
+                border-bottom: 1px solid #eef3fa;
+                vertical-align: top;
+                white-space: normal;
+                word-break: break-word;
+            }}
+            .dep-table tr:last-child td {{
+                border-bottom: none;
+            }}
+            h2, .stSubheader {{
+                font-size: 1.25rem;
+                margin-top: 0.6rem;
+            }}
+            @media (max-width: 768px) {{
+                .header-inner {{
+                    align-items: center;
+                    flex-wrap: wrap;
+                    justify-content: center;
+                }}
+                .header-container {{
+                    flex-direction: column;
+                    align-items: center;
+                    text-align: center;
+                }}
+                .header-title-wrap {{
+                    text-align: center;
+                    margin-left: 0;
+                }}
+                .header-title {{
+                    font-size: 1.45rem;
+                }}
+                .header-subtitle {{
+                    font-size: 0.9rem;
+                }}
+                .mobile-logo {{
+                    display: block;
+                    height: 2.6rem;
+                    width: auto;
+                    border-radius: 8px;
+                    box-shadow: 0 3px 8px rgba(15, 23, 42, 0.15);
+                }}
+                .pulse-score {{
+                    font-size: 2rem;
+                }}
+                .pulse-meta {{
+                    font-size: 0.8rem;
+                }}
+                .pulse-spark {{
+                    font-size: 0.95rem;
+                    letter-spacing: 0.8px;
+                }}
+                .dep-table {{
+                    font-size: 0.85rem;
+                }}
+                .dep-table th, .dep-table td {{
+                    padding: 8px 9px;
+                }}
+            }}
+        </style>
 
-    <div class="header-bar">
-        <div class="header-container">
-            <div class="header-inner">
-                <div class="header-left">
-                    {f'<img src="data:image/png;base64,{logo}" class="mobile-logo">' if logo else ""}
-                    <div class="header-title-wrap">
-                        <div class="header-title">Data Engineering Pilipinas Meetup Dashboard</div>
-                        <div class="header-subtitle">Live community pulse: events, attendance, and growth</div>
+        <div class="header-bar">
+            <div class="header-container">
+                <div class="header-inner">
+                    <div class="header-left">
+                        {f'<img src="data:image/png;base64,{logo}" class="mobile-logo">' if logo else ""}
+                        <div class="header-title-wrap">
+                            <div class="header-title">Data Engineering Pilipinas Meetup Dashboard</div>
+                            <div class="header-subtitle">Live community pulse: events, attendance, and growth</div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+        """,
+        unsafe_allow_html=True,
+    )
 
 
-viewport_width = get_viewport_width()
-is_narrow = viewport_width is not None and viewport_width < 800
-if viewport_width is not None:
-    st.session_state["vw_param"] = viewport_width
+    viewport_width = get_viewport_width()
+    is_narrow = viewport_width is not None and viewport_width < 800
+    if viewport_width is not None:
+        st.session_state["vw_param"] = viewport_width
 
-if PAGE_VIEW == "all":
-    if PAGE_VIEW == "insights":
+    if PAGE_VIEW == "all":
+        if PAGE_VIEW == "insights":
+            st.markdown(
+                f"""
+                <div class="pulse-wrap">
+                  <div class="pulse-title">Community Pulse Score</div>
+                  <div class="pulse-main">
+                    <div class="pulse-score">{pulse['score']}/100</div>
+                    <div class="pulse-label">{pulse['label']}</div>
+                  </div>
+                  <div class="pulse-meta">
+                    Community {pulse['community']} | Activity {pulse['activity']} | Attendance {pulse['attendance']} | Momentum {pulse['momentum']}
+                  </div>
+                  <div class="pulse-spark">Attendance trend: {pulse['sparkline']}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+    st.caption(f"Data source: {pulse_source} | Last refresh: {pulse_saved_at or 'n/a'}")
+    if pulse_source == "Unavailable":
+        st.error(
+            "Live Meetup data is unavailable and no snapshot was found. "
+            "Set MEETUP_TOKEN or provide a snapshot to see real data."
+        )
+    elif pulse_source != "Live API":
+        st.warning(
+            "Showing snapshot data because live Meetup API is unavailable. "
+            "Some metrics may be out of date."
+        )
+    compact_view = st.toggle(
+        "Compact mobile view",
+        value=is_narrow,
+        help="Use shorter tables and tighter text for small screens.",
+        key="compact_view",
+    )
+
+    def render_meetup_events_section():
+        st.markdown('<div id="events"></div>', unsafe_allow_html=True)
+        st.subheader("Meetup Events")
+        raw_controls = st.columns(3)
+        raw_year = raw_controls[0]
+        raw_month = raw_controls[1]
+        raw_reset = raw_controls[2]
+
+        raw_all = pd.concat([df_up, df_past], ignore_index=True)
+        raw_all["Date and Time"] = pd.to_datetime(raw_all.get("Date and Time"), errors="coerce")
+        raw_all = raw_all.dropna(subset=["Date and Time"])
+        available_years = sorted(raw_all["Date and Time"].dt.year.unique().tolist())
+        past_year = None
+        if not df_past.empty:
+            past_years = pd.to_datetime(df_past.get("Date and Time"), errors="coerce").dt.year.dropna()
+            if not past_years.empty:
+                past_year = int(past_years.max())
+        default_year = past_year or (available_years[-1] if available_years else pd.Timestamp.now().year)
+        year_index = available_years.index(default_year) if default_year in available_years else 0
+        year_value = raw_year.selectbox("Filter year", options=available_years, index=year_index)
+
+        month_names = ["All"] + [pd.Timestamp(2000, m, 1).strftime("%B") for m in range(1, 13)]
+        month_value = raw_month.selectbox("Filter month", options=month_names, index=0)
+        if raw_reset.button("Clear filters"):
+            year_value = default_year
+            month_value = "All"
+
+        def _month_number(name):
+            if name == "All":
+                return None
+            for idx, label in enumerate(month_names[1:], start=1):
+                if label == name:
+                    return idx
+            return None
+
+        def filter_raw(df):
+            if df.empty:
+                return df
+            out = df.copy()
+            out["Date and Time"] = pd.to_datetime(out.get("Date and Time"), errors="coerce")
+            out = out.dropna(subset=["Date and Time"])
+            out = out[out["Date and Time"].dt.year == int(year_value)]
+            month_num = _month_number(month_value)
+            if month_num:
+                out = out[out["Date and Time"].dt.month == month_num]
+            return out
+
+        tab1, tab2 = st.tabs(["Upcoming Events", "Past Events"])
+
+        with tab1:
+            df_up_filtered = filter_raw(df_up)
+            if not df_up_filtered.empty:
+                df_up_display = df_up_filtered.copy()
+                date_fmt = "%a, %b %d, %Y" if compact_view else "%a, %b %d, %Y %I:%M %p"
+                df_up_display["Date and Time"] = pd.to_datetime(df_up_display["Date and Time"]).dt.strftime(
+                    date_fmt
+                )
+                df_up_display["Event Title"] = df_up_display.apply(
+                    lambda row: format_event_link(row["Event Title"], row["Event URL"]),
+                    axis=1,
+                )
+                df_up_display["Feedback"] = df_up_display.apply(
+                    lambda row: format_feedback_link(row.get("Event ID", ""), row.get("Event Title", "")),
+                    axis=1,
+                )
+                if compact_view:
+                    df_up_display = df_up_display[["Event Title", "Date and Time", "Feedback"]]
+                else:
+                    df_up_display = df_up_display.drop(columns=["Event URL", "Event ID"], errors="ignore")
+                render_responsive_table(df_up_display, allow_html_columns=["Event Title", "Feedback"])
+            else:
+                st.info("No upcoming events found.")
+
+        with tab2:
+            df_past_filtered = filter_raw(df_past)
+            if not df_past_filtered.empty:
+                df_past_display = df_past_filtered.copy()
+                df_past_display["Date and Time"] = pd.to_datetime(df_past_display["Date and Time"])
+                df_past_display = df_past_display.sort_values(
+                    "Date and Time", ascending=False
+                ).reset_index(drop=True)
+                date_fmt = "%a, %b %d, %Y" if compact_view else "%a, %b %d, %Y %I:%M %p"
+                df_past_display["Date and Time"] = df_past_display["Date and Time"].dt.strftime(date_fmt)
+                df_past_display["Event Title"] = df_past_display.apply(
+                    lambda row: format_event_link(row["Event Title"], row["Event URL"]),
+                    axis=1,
+                )
+                df_past_display["Feedback"] = df_past_display.apply(
+                    lambda row: format_feedback_link(row.get("Event ID", ""), row.get("Event Title", "")),
+                    axis=1,
+                )
+                if compact_view:
+                    df_past_display = df_past_display[
+                        ["Event Title", "Date and Time", "No. of Attendees", "Feedback"]
+                    ]
+                else:
+                    df_past_display = df_past_display.drop(
+                        columns=["Event URL", "Event ID"], errors="ignore"
+                    )
+                render_responsive_table(df_past_display, allow_html_columns=["Event Title", "Feedback"])
+            else:
+                st.info("No past events found.")
+
+
+    # --- Insights / Story ---
+    if PAGE_VIEW in ("all", "insights"):
+        st.markdown('<div id="insights"></div>', unsafe_allow_html=True)
+
         st.markdown(
             f"""
             <div class="pulse-wrap">
@@ -1116,341 +1270,203 @@ if PAGE_VIEW == "all":
             """,
             unsafe_allow_html=True,
         )
-st.caption(f"Data source: {pulse_source} | Last refresh: {pulse_saved_at or 'n/a'}")
-if pulse_source == "Unavailable":
-    st.error(
-        "Live Meetup data is unavailable and no snapshot was found. "
-        "Set MEETUP_TOKEN or provide a snapshot to see real data."
-    )
-elif pulse_source != "Live API":
-    st.warning(
-        "Showing snapshot data because live Meetup API is unavailable. "
-        "Some metrics may be out of date."
-    )
-compact_view = st.toggle(
-    "Compact mobile view",
-    value=is_narrow,
-    help="Use shorter tables and tighter text for small screens.",
-)
 
-def render_meetup_events_section():
-    st.markdown('<div id="events"></div>', unsafe_allow_html=True)
-    st.subheader("Meetup Events")
-    raw_controls = st.columns(3)
-    raw_year = raw_controls[0]
-    raw_month = raw_controls[1]
-    raw_reset = raw_controls[2]
+    # --- Meetup Events ---
+    if PAGE_VIEW == "events":
+        render_meetup_events_section()
 
-    raw_all = pd.concat([df_up, df_past], ignore_index=True)
-    raw_all["Date and Time"] = pd.to_datetime(raw_all.get("Date and Time"), errors="coerce")
-    raw_all = raw_all.dropna(subset=["Date and Time"])
-    available_years = sorted(raw_all["Date and Time"].dt.year.unique().tolist())
-    past_year = None
-    if not df_past.empty:
-        past_years = pd.to_datetime(df_past.get("Date and Time"), errors="coerce").dt.year.dropna()
-        if not past_years.empty:
-            past_year = int(past_years.max())
-    default_year = past_year or (available_years[-1] if available_years else pd.Timestamp.now().year)
-    year_index = available_years.index(default_year) if default_year in available_years else 0
-    year_value = raw_year.selectbox("Filter year", options=available_years, index=year_index)
+    if PAGE_VIEW == "all":
+        with st.expander("How Community Pulse Score works"):
+            st.markdown("""
+    The **Community Pulse Score** is a 0-100 health signal for this meetup community.
 
-    month_names = ["All"] + [pd.Timestamp(2000, m, 1).strftime("%B") for m in range(1, 13)]
-    month_value = raw_month.selectbox("Filter month", options=month_names, index=0)
-    if raw_reset.button("Clear filters"):
-        year_value = default_year
-        month_value = "All"
+    **Formula**
+    - Community size (25%): member count normalized to a 5,000-member benchmark.
+    - Activity (25%): upcoming events normalized to a 6-event benchmark.
+    - Attendance quality (30%): average past attendance normalized to an 80-attendee benchmark.
+    - Momentum (20%): trend signal from recent 3 events vs previous 3 events.
 
-    def _month_number(name):
-        if name == "All":
-            return None
-        for idx, label in enumerate(month_names[1:], start=1):
-            if label == name:
-                return idx
-        return None
+    **Why it matters**
+    - It gives stakeholders a fast snapshot of community health.
+    - It combines both leading indicators (upcoming activity) and lagging indicators (attendance history).
+    - It helps prioritize action quickly: schedule more events, improve promotion, or optimize topics/speakers.
 
-    def filter_raw(df):
-        if df.empty:
-            return df
-        out = df.copy()
-        out["Date and Time"] = pd.to_datetime(out.get("Date and Time"), errors="coerce")
-        out = out.dropna(subset=["Date and Time"])
-        out = out[out["Date and Time"].dt.year == int(year_value)]
-        month_num = _month_number(month_value)
-        if month_num:
-            out = out[out["Date and Time"].dt.month == month_num]
-        return out
+    **Important note**
+    - This score supports decisions, but it should be read with the detailed KPIs and charts below.
+    """)
+            
+        st.subheader("Community Insights")
 
-    tab1, tab2 = st.tabs(["Upcoming Events", "Past Events"])
-
-    with tab1:
-        df_up_filtered = filter_raw(df_up)
-        if not df_up_filtered.empty:
-            df_up_display = df_up_filtered.copy()
-            date_fmt = "%a, %b %d, %Y" if compact_view else "%a, %b %d, %Y %I:%M %p"
-            df_up_display["Date and Time"] = pd.to_datetime(df_up_display["Date and Time"]).dt.strftime(
-                date_fmt
-            )
-            df_up_display["Event Title"] = df_up_display.apply(
-                lambda row: format_event_link(row["Event Title"], row["Event URL"]),
-                axis=1,
-            )
-            df_up_display["Feedback"] = df_up_display.apply(
-                lambda row: format_feedback_link(row.get("Event ID", ""), row.get("Event Title", "")),
-                axis=1,
-            )
-            if compact_view:
-                df_up_display = df_up_display[["Event Title", "Date and Time", "Feedback"]]
-            else:
-                df_up_display = df_up_display.drop(columns=["Event URL", "Event ID"], errors="ignore")
-            render_responsive_table(df_up_display, allow_html_columns=["Event Title", "Feedback"])
+        if df_past.empty and df_up.empty:
+            st.info("No event data available yet. Check back later!")
         else:
-            st.info("No upcoming events found.")
+            total_past = len(df_past)
+            total_upcoming = len(df_up)
+            attendance_series = df_past.get("No. of Attendees")
+            avg_attendance = safe_metric(attendance_series, agg="mean")
+            max_attendance = safe_metric(attendance_series, agg="max")
+            min_attendance = safe_metric(attendance_series, agg="min")
 
-    with tab2:
-        df_past_filtered = filter_raw(df_past)
-        if not df_past_filtered.empty:
-            df_past_display = df_past_filtered.copy()
-            df_past_display["Date and Time"] = pd.to_datetime(df_past_display["Date and Time"])
-            df_past_display = df_past_display.sort_values(
-                "Date and Time", ascending=False
-            ).reset_index(drop=True)
-            date_fmt = "%a, %b %d, %Y" if compact_view else "%a, %b %d, %Y %I:%M %p"
-            df_past_display["Date and Time"] = df_past_display["Date and Time"].dt.strftime(date_fmt)
-            df_past_display["Event Title"] = df_past_display.apply(
-                lambda row: format_event_link(row["Event Title"], row["Event URL"]),
-                axis=1,
-            )
-            df_past_display["Feedback"] = df_past_display.apply(
-                lambda row: format_feedback_link(row.get("Event ID", ""), row.get("Event Title", "")),
-                axis=1,
-            )
-            if compact_view:
-                df_past_display = df_past_display[
-                    ["Event Title", "Date and Time", "No. of Attendees", "Feedback"]
-                ]
-            else:
-                df_past_display = df_past_display.drop(
-                    columns=["Event URL", "Event ID"], errors="ignore"
+            story = f"""
+            The **Data Engineering Pilipinas (DEP)** community now has over **{member_count:,} members**.  
+
+            We have hosted **{total_past} past events** so far.  
+            On average, each session gathered around **{avg_attendance} attendees**, 
+            with participation ranging between **{min_attendance} and {max_attendance}**.
+
+            Currently, there is/are **{total_upcoming} upcoming event/events** planned.  
+            The community continues to grow, showing consistent engagement from members and speakers.
+            """
+            st.markdown(story)
+
+            if not df_up.empty:
+                next_event = df_up.copy()
+                next_event["Date and Time"] = pd.to_datetime(
+                    next_event["Date and Time"], errors="coerce"
                 )
-            render_responsive_table(df_past_display, allow_html_columns=["Event Title", "Feedback"])
-        else:
-            st.info("No past events found.")
-
-
-# --- Insights / Story ---
-if PAGE_VIEW in ("all", "insights"):
-    st.markdown('<div id="insights"></div>', unsafe_allow_html=True)
-
-    st.markdown(
-        f"""
-        <div class="pulse-wrap">
-          <div class="pulse-title">Community Pulse Score</div>
-          <div class="pulse-main">
-            <div class="pulse-score">{pulse['score']}/100</div>
-            <div class="pulse-label">{pulse['label']}</div>
-          </div>
-          <div class="pulse-meta">
-            Community {pulse['community']} | Activity {pulse['activity']} | Attendance {pulse['attendance']} | Momentum {pulse['momentum']}
-          </div>
-          <div class="pulse-spark">Attendance trend: {pulse['sparkline']}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-# --- Meetup Events ---
-if PAGE_VIEW == "events":
-    render_meetup_events_section()
-
-if PAGE_VIEW == "all":
-    with st.expander("How Community Pulse Score works"):
-        st.markdown("""
-The **Community Pulse Score** is a 0-100 health signal for this meetup community.
-
-**Formula**
-- Community size (25%): member count normalized to a 5,000-member benchmark.
-- Activity (25%): upcoming events normalized to a 6-event benchmark.
-- Attendance quality (30%): average past attendance normalized to an 80-attendee benchmark.
-- Momentum (20%): trend signal from recent 3 events vs previous 3 events.
-
-**Why it matters**
-- It gives stakeholders a fast snapshot of community health.
-- It combines both leading indicators (upcoming activity) and lagging indicators (attendance history).
-- It helps prioritize action quickly: schedule more events, improve promotion, or optimize topics/speakers.
-
-**Important note**
-- This score supports decisions, but it should be read with the detailed KPIs and charts below.
-""")
-        
-    st.subheader("Community Insights")
-
-    if df_past.empty and df_up.empty:
-        st.info("No event data available yet. Check back later!")
-    else:
-        total_past = len(df_past)
-        total_upcoming = len(df_up)
-        attendance_series = df_past.get("No. of Attendees")
-        avg_attendance = safe_metric(attendance_series, agg="mean")
-        max_attendance = safe_metric(attendance_series, agg="max")
-        min_attendance = safe_metric(attendance_series, agg="min")
-
-        story = f"""
-        The **Data Engineering Pilipinas (DEP)** community now has over **{member_count:,} members**.  
-
-        We have hosted **{total_past} past events** so far.  
-        On average, each session gathered around **{avg_attendance} attendees**, 
-        with participation ranging between **{min_attendance} and {max_attendance}**.
-
-        Currently, there is/are **{total_upcoming} upcoming event/events** planned.  
-        The community continues to grow, showing consistent engagement from members and speakers.
-        """
-        st.markdown(story)
-
-        if not df_up.empty:
-            next_event = df_up.copy()
-            next_event["Date and Time"] = pd.to_datetime(
-                next_event["Date and Time"], errors="coerce"
-            )
-            next_event = (
-                next_event.dropna(subset=["Date and Time"])
-                .sort_values("Date and Time")
-                .head(1)
-            )
-            next_event = next_event.iloc[0] if not next_event.empty else df_up.iloc[0]
-            next_dt = pd.to_datetime(next_event.get("Date and Time"), errors="coerce")
-            next_dt_str = (
-                next_dt.strftime("%a, %b %d, %Y %I:%M %p") if pd.notna(next_dt) else "TBA"
-            )
-            speaker_text = ""
-            speaker_name = str(next_event.get("Speakers", "")).strip()
-            if speaker_name:
-                speaker_text = f" | Speaker: **{speaker_name}**"
-            online_flag = next_event.get("Online?")
-            if online_flag is True:
-                mode_text = "Online"
-            elif online_flag is False:
-                mode_text = "In-person"
-            else:
-                mode_text = "TBA"
-            st.success(
-                f"Next event: **[{next_event['Event Title']}]({next_event['Event URL']})** "
-                f"on **{next_dt_str}** | **{mode_text}**{speaker_text}"
-            )
-
-
-# --- Metrics ---
-if PAGE_VIEW in ("all", "kpi"):
-    st.markdown('<div id="kpi"></div>', unsafe_allow_html=True)
-    st.subheader("KPI Overview")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total Members", member_count)
-    c2.metric("Upcoming Events", len(df_up) if not df_up.empty else 0)
-    c3.metric("Past Events", len(df_past) if not df_past.empty else 0)
-    c4.metric("Avg Past Attendance", safe_metric(df_past.get("No. of Attendees"), agg="mean"))
-
-# --- Charts ---
-if PAGE_VIEW in ("all", "analytics"):
-    st.markdown('<div id="analytics"></div>', unsafe_allow_html=True)
-    st.subheader("Event Analytics")
-
-    if not df_past.empty:
-        df_past["Date and Time"] = pd.to_datetime(df_past["Date and Time"])
-        df_past_sorted = df_past.sort_values("Date and Time").reset_index(drop=True)
-        df_past_sorted.index += 1
-
-        fig_attendance = px.line(
-            df_past_sorted,
-            x="Date and Time",
-            y="No. of Attendees",
-            title="Attendance Trend Over Time",
-            markers=True,
-            hover_data={"Event Title": True, "Date and Time": True, "No. of Attendees": True},
-        )
-        fig_attendance.update_layout(
-            template="plotly_white",
-            margin=dict(l=8, r=8, t=55, b=8),
-            title_x=0.01,
-            title_font_size=20,
-            plot_bgcolor="#ffffff",
-            paper_bgcolor="#ffffff",
-        )
-        fig_attendance.update_traces(line=dict(color="#1d4ed8", width=3), marker=dict(size=7))
-        st.plotly_chart(fig_attendance, use_container_width=True)
-
-        monthly = df_past_sorted.copy()
-        monthly["Year"] = monthly["Date and Time"].dt.year.astype(str)
-        monthly["Month"] = monthly["Date and Time"].dt.strftime("%b")
-        month_order = [
-            "Jan",
-            "Feb",
-            "Mar",
-            "Apr",
-            "May",
-            "Jun",
-            "Jul",
-            "Aug",
-            "Sep",
-            "Oct",
-            "Nov",
-            "Dec",
-        ]
-        monthly["Month"] = pd.Categorical(monthly["Month"], categories=month_order, ordered=True)
-        monthly_rollup = (
-            monthly.groupby(["Year", "Month"], observed=True)["No. of Attendees"]
-            .mean()
-            .reset_index(name="Avg Attendance")
-        )
-        monthly_rollup = monthly_rollup.sort_values(["Year", "Month"])
-
-        heatmap_data = monthly_rollup.pivot(index="Year", columns="Month", values="Avg Attendance")
-        heatmap_data = heatmap_data.reindex(columns=month_order)
-        heatmap_data.index = pd.to_numeric(heatmap_data.index, errors="coerce")
-        heatmap_data = heatmap_data.sort_index(ascending=False)
-        heatmap_data.index = heatmap_data.index.astype("Int64").astype(str)
-
-        fig_heatmap = px.imshow(
-            heatmap_data,
-            color_continuous_scale="Blues",
-            aspect="auto",
-            title="Monthly Attendance Heatmap",
-            labels={"x": "Month", "y": "Year", "color": "Avg Attendance"},
-        )
-        fig_heatmap.update_layout(
-            template="plotly_white",
-            margin=dict(l=8, r=8, t=55, b=8),
-            title_x=0.01,
-            title_font_size=20,
-            plot_bgcolor="#ffffff",
-            paper_bgcolor="#ffffff",
-        )
-        fig_heatmap.update_traces(
-            hovertemplate="Year: %{y}<br>Month: %{x}<br>Avg Attendance: %{z:.1f}<extra></extra>"
-        )
-        st.plotly_chart(fig_heatmap, use_container_width=True)
-    else:
-        st.info("No past events available yet for trend and heatmap analytics.")
-
-if PAGE_VIEW in ("all", "speakers"):
-    st.markdown('<div id="speakers"></div>', unsafe_allow_html=True)
-    st.subheader("Speaker Leaderboard")
-    speaker_board = build_speaker_leaderboard(df_past)
-    if speaker_board.empty:
-        st.info("No speaker data available yet.")
-    else:
-        leader_cols = st.columns(3)
-        top_rows = speaker_board.head(3).to_dict(orient="records")
-        for idx, row in enumerate(top_rows):
-            with leader_cols[idx]:
-                st.markdown(
-                    f"""
-                    <div class="leader-card">
-                        <div class="leader-rank">Rank #{idx + 1}</div>
-                        <div class="leader-name">{sanitize_title(row["Speaker"])}</div>
-                        <div class="leader-count">{int(row["Sessions"])} sessions | avg attendance {int(row["Avg Attendance"])}</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
+                next_event = (
+                    next_event.dropna(subset=["Date and Time"])
+                    .sort_values("Date and Time")
+                    .head(1)
+                )
+                next_event = next_event.iloc[0] if not next_event.empty else df_up.iloc[0]
+                next_dt = pd.to_datetime(next_event.get("Date and Time"), errors="coerce")
+                next_dt_str = (
+                    next_dt.strftime("%a, %b %d, %Y %I:%M %p") if pd.notna(next_dt) else "TBA"
+                )
+                speaker_text = ""
+                speaker_name = str(next_event.get("Speakers", "")).strip()
+                if speaker_name:
+                    speaker_text = f" | Speaker: **{speaker_name}**"
+                online_flag = next_event.get("Online?")
+                if online_flag is True:
+                    mode_text = "Online"
+                elif online_flag is False:
+                    mode_text = "In-person"
+                else:
+                    mode_text = "TBA"
+                st.success(
+                    f"Next event: **[{next_event['Event Title']}]({next_event['Event URL']})** "
+                    f"on **{next_dt_str}** | **{mode_text}**{speaker_text}"
                 )
 
-if PAGE_VIEW == "all":
-    render_meetup_events_section()
+
+    # --- Metrics ---
+    if PAGE_VIEW in ("all", "kpi"):
+        st.markdown('<div id="kpi"></div>', unsafe_allow_html=True)
+        st.subheader("KPI Overview")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total Members", member_count)
+        c2.metric("Upcoming Events", len(df_up) if not df_up.empty else 0)
+        c3.metric("Past Events", len(df_past) if not df_past.empty else 0)
+        c4.metric("Avg Past Attendance", safe_metric(df_past.get("No. of Attendees"), agg="mean"))
+
+    # --- Charts ---
+    if PAGE_VIEW in ("all", "analytics"):
+        st.markdown('<div id="analytics"></div>', unsafe_allow_html=True)
+        st.subheader("Event Analytics")
+
+        if not df_past.empty:
+            df_past["Date and Time"] = pd.to_datetime(df_past["Date and Time"])
+            df_past_sorted = df_past.sort_values("Date and Time").reset_index(drop=True)
+            df_past_sorted.index += 1
+
+            fig_attendance = px.line(
+                df_past_sorted,
+                x="Date and Time",
+                y="No. of Attendees",
+                title="Attendance Trend Over Time",
+                markers=True,
+                hover_data={"Event Title": True, "Date and Time": True, "No. of Attendees": True},
+            )
+            fig_attendance.update_layout(
+                template="plotly_white",
+                margin=dict(l=8, r=8, t=55, b=8),
+                title_x=0.01,
+                title_font_size=20,
+                plot_bgcolor="#ffffff",
+                paper_bgcolor="#ffffff",
+            )
+            fig_attendance.update_traces(line=dict(color="#1d4ed8", width=3), marker=dict(size=7))
+            st.plotly_chart(fig_attendance, use_container_width=True)
+
+            monthly = df_past_sorted.copy()
+            monthly["Year"] = monthly["Date and Time"].dt.year.astype(str)
+            monthly["Month"] = monthly["Date and Time"].dt.strftime("%b")
+            month_order = [
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec",
+            ]
+            monthly["Month"] = pd.Categorical(monthly["Month"], categories=month_order, ordered=True)
+            monthly_rollup = (
+                monthly.groupby(["Year", "Month"], observed=True)["No. of Attendees"]
+                .mean()
+                .reset_index(name="Avg Attendance")
+            )
+            monthly_rollup = monthly_rollup.sort_values(["Year", "Month"])
+
+            heatmap_data = monthly_rollup.pivot(index="Year", columns="Month", values="Avg Attendance")
+            heatmap_data = heatmap_data.reindex(columns=month_order)
+            heatmap_data.index = pd.to_numeric(heatmap_data.index, errors="coerce")
+            heatmap_data = heatmap_data.sort_index(ascending=False)
+            heatmap_data.index = heatmap_data.index.astype("Int64").astype(str)
+
+            fig_heatmap = px.imshow(
+                heatmap_data,
+                color_continuous_scale="Blues",
+                aspect="auto",
+                title="Monthly Attendance Heatmap",
+                labels={"x": "Month", "y": "Year", "color": "Avg Attendance"},
+            )
+            fig_heatmap.update_layout(
+                template="plotly_white",
+                margin=dict(l=8, r=8, t=55, b=8),
+                title_x=0.01,
+                title_font_size=20,
+                plot_bgcolor="#ffffff",
+                paper_bgcolor="#ffffff",
+            )
+            fig_heatmap.update_traces(
+                hovertemplate="Year: %{y}<br>Month: %{x}<br>Avg Attendance: %{z:.1f}<extra></extra>"
+            )
+            st.plotly_chart(fig_heatmap, use_container_width=True)
+        else:
+            st.info("No past events available yet for trend and heatmap analytics.")
+
+    if PAGE_VIEW in ("all", "speakers"):
+        st.markdown('<div id="speakers"></div>', unsafe_allow_html=True)
+        st.subheader("Speaker Leaderboard")
+        speaker_board = build_speaker_leaderboard(df_past)
+        if speaker_board.empty:
+            st.info("No speaker data available yet.")
+        else:
+            leader_cols = st.columns(3)
+            top_rows = speaker_board.head(3).to_dict(orient="records")
+            for idx, row in enumerate(top_rows):
+                with leader_cols[idx]:
+                    st.markdown(
+                        f"""
+                        <div class="leader-card">
+                            <div class="leader-rank">Rank #{idx + 1}</div>
+                            <div class="leader-name">{sanitize_title(row["Speaker"])}</div>
+                            <div class="leader-count">{int(row["Sessions"])} sessions | avg attendance {int(row["Avg Attendance"])}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+    if PAGE_VIEW == "all":
+        render_meetup_events_section()
+
+if __name__ == "__main__":
+    main()

@@ -20,10 +20,18 @@ Streamlit analytics app for Data Engineering Pilipinas Meetup data, powered by M
 ## Local setup
 ```bash
 python -m venv .venv
-.venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
 streamlit run meetup.py
 ```
+
+You can override the data cache TTL to reduce API calls during development or testing. Example (24h cache):
+
+```bash
+DATA_TTL_SECONDS=86400 source .venv/bin/activate && .venv/bin/python -m streamlit run meetup.py
+```
+
+If you want automated snapshot refreshes (recommended to avoid live API hits), add a scheduled job (GitHub Actions or cron) that runs the included `fetch_snapshot.py` script. The repository contains a sample GitHub Actions workflow at `.github/workflows/snapshot.yml` that runs nightly and writes the snapshot to the configured backend. By default the workflow uses the file backend and only requires the `MEETUP_TOKEN` secret; S3 is optional and can be enabled later by changing `SNAPSHOT_BACKEND` and providing S3 secrets.
 
 ## Secrets and environment variables
 Set at least one Meetup token source:
@@ -83,6 +91,8 @@ pytest -q
 ```text
 meetup.py                  # Streamlit app UI + data loading
 meetup_metrics.py          # Analytics functions (testable core)
+fetch_snapshot.py          # Scheduled snapshot fetch helper
 tests/test_meetup_metrics.py
 .github/workflows/ci.yml
+.github/workflows/snapshot.yml
 ```
