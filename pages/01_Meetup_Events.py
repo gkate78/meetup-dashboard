@@ -1,7 +1,8 @@
 import os
-import importlib
 
 import streamlit as st
+
+import meetup  # noqa: F401
 
 os.environ["DEP_PAGE"] = "events"
 st.session_state["DEP_PAGE"] = "events"
@@ -11,5 +12,6 @@ try:
 except Exception:
     pass
 
-import meetup  # noqa: F401
+
+
 meetup.main()

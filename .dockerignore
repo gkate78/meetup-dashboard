@@ -30,6 +30,8 @@ all_events.json
 all_events.csv
 data/feedback.csv
 data/speaker_overrides.csv
+RELEASE.md
+notes/
 *.json.bak
 *.csv.bak
 

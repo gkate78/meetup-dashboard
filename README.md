@@ -18,6 +18,13 @@ Streamlit analytics app for Data Engineering Pilipinas Meetup data, powered by M
 - Requests
 - Optional snapshot backend: S3 via boto3
 
+## Requirements
+To run the app in a new project, you need:
+- A Meetup GraphQL token
+- Python 3.11+
+- A writable snapshot path or S3 bucket for cached Meetup data
+- Persistent storage for feedback and speaker override CSV files if you want those features enabled
+
 ## Local setup
 ```bash
 python -m venv .venv
@@ -33,6 +40,23 @@ DATA_TTL_SECONDS=86400 source .venv/bin/activate && .venv/bin/python -m streamli
 ```
 
 If you want automated snapshot refreshes (recommended to avoid live API hits), add a scheduled job (GitHub Actions or cron) that runs the included `fetch_snapshot.py` script. The repository contains a sample GitHub Actions workflow at `.github/workflows/snapshot.yml` that runs nightly and writes the snapshot to the configured backend. By default the workflow uses the file backend and only requires the `MEETUP_TOKEN` secret; S3 is optional and can be enabled later by changing `SNAPSHOT_BACKEND` and providing S3 secrets.
+
+## Data files
+The app expects these runtime files to be writable:
+- `SNAPSHOT_PATH` for cached dashboard snapshots when `SNAPSHOT_BACKEND=file`
+- `FEEDBACK_DATA_PATH` for submitted feedback rows
+- `SPEAKER_OVERRIDES_PATH` for manual speaker normalization overrides
+
+Recommended initial schemas:
+```csv
+# feedback.csv
+event_id,event_title,rating,comment,submitted_at
+```
+
+```csv
+# speaker_overrides.csv
+event_id,canonical_speakers,source,notes
+```
 
 ## Secrets and environment variables
 Set at least one Meetup token source:
@@ -70,12 +94,13 @@ Speaker overrides for missing past speakers:
 4. (Optional) Add env vars for S3 snapshot backend.
 
 ### Dokploy
-Mount persistent storage for the runtime CSVs and point the app at those paths:
+Use mounted storage for the runtime files and point the app at those paths:
 
-- `FEEDBACK_DATA_PATH` -> mounted feedback CSV
-- `SPEAKER_OVERRIDES_PATH` -> mounted speaker overrides CSV
+- `FEEDBACK_DATA_PATH` -> mounted `feedback.csv`
+- `SPEAKER_OVERRIDES_PATH` -> mounted `speaker_overrides.csv`
+- `SNAPSHOT_PATH` -> mounted cache path if you want file-based snapshots
 
-Keep `FEEDBACK_FORM_URL` empty if you want only the in-app feedback page.
+Keep `FEEDBACK_FORM_URL` empty if you want only the in-app feedback page. If you reuse this pattern in another project, the deploy only needs the same environment variables and writable data paths.
 
 ### Health checks before go-live
 1. Launch app and verify `Data source: Live API` in the caption.

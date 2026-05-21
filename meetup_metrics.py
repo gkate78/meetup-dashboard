@@ -1,5 +1,6 @@
 import pandas as pd
 
+
 def build_sparkline(values):
     bars = "▁▂▃▄▅▆▇█"
     clean = [v for v in values if pd.notna(v)]

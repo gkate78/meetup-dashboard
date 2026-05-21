@@ -5,10 +5,9 @@ This script is intended to be run from CI (GitHub Actions) or a cron job.
 It imports the shared `meetup` module and triggers the dashboard data fetch,
 which will save a snapshot via the configured `SNAPSHOT_BACKEND`.
 """
-import os
 import logging
 
-from meetup import get_dashboard_data, URLNAME
+from meetup import URLNAME, get_dashboard_data
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("fetch_snapshot")
