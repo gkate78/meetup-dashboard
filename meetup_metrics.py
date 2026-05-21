@@ -16,6 +16,7 @@ def build_sparkline(values):
         out.append(bars[idx])
     return "".join(out)
 
+
 def safe_metric(series, agg="count"):
     if series is None or series.dropna().empty:
         return 0
@@ -32,7 +33,6 @@ def safe_metric(series, agg="count"):
 
 def clamp(value, lower=0, upper=100):
     return max(lower, min(upper, value))
-
 
 
 def build_speaker_leaderboard(df):

@@ -82,10 +82,14 @@ REQUEST_TIMEOUT = (
 MAX_RETRIES = int(os.getenv("API_MAX_RETRIES", "4"))
 RETRY_BASE_SECONDS = float(os.getenv("API_RETRY_BASE_SECONDS", "1.5"))
 PAGE_VIEW = (
-    st.session_state.get("DEP_PAGE")
-    if "DEP_PAGE" in st.session_state
-    else os.getenv("DEP_PAGE", "all")
-).strip().lower()
+    (
+        st.session_state.get("DEP_PAGE")
+        if "DEP_PAGE" in st.session_state
+        else os.getenv("DEP_PAGE", "all")
+    )
+    .strip()
+    .lower()
+)
 
 # How long to cache dashboard data (seconds). Increase to reduce API calls.
 # Default to 24 hours since the meetup data doesn't change frequently.
@@ -409,7 +413,11 @@ def render_monthly_calendar(
         row_html = "<div class='calendar-row compact'>"
         for d in week:
             is_current = d.month == selected_month
-            cell_class = "calendar-day compact current-month" if is_current else "calendar-day compact other-month"
+            cell_class = (
+                "calendar-day compact current-month"
+                if is_current
+                else "calendar-day compact other-month"
+            )
             events = events_by_day.get(d, []) if is_current else []
             has_events = bool(events)
             highlight = " has-event" if has_events else ""
@@ -476,7 +484,10 @@ def render_monthly_calendar(
         events_for_day = events_by_day.get(picked, [])
         if not events_for_day:
             st.info("No events scheduled for this date.")
-        st.markdown(f"<div class='calendar-details'><strong>{picked.strftime('%B %d, %Y')}</strong></div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='calendar-details'><strong>{picked.strftime('%B %d, %Y')}</strong></div>",
+            unsafe_allow_html=True,
+        )
         for event in events_for_day:
             title = sanitize_title(event.get("Event Title", "Untitled"))
             url = event.get("Event URL", "#")
@@ -484,7 +495,9 @@ def render_monthly_calendar(
             online = event.get("Online?", False)
             dt = pd.to_datetime(event.get("Date and Time"), errors="coerce")
             time_label = dt.strftime("%I:%M %p") if not pd.isna(dt) else "TBD"
-            date_label = dt.strftime("%b %d, %Y") if not pd.isna(dt) else picked.strftime("%b %d, %Y")
+            date_label = (
+                dt.strftime("%b %d, %Y") if not pd.isna(dt) else picked.strftime("%b %d, %Y")
+            )
             speaker = sanitize_title(event.get("Speakers", ""))
             mode = "Online" if online else "In-person"
             event_id = str(event.get("Event ID", "")).strip()
@@ -510,10 +523,7 @@ def format_feedback_link(event_id, title):
         return ""
     safe_title = sanitize_title(title)
     event_id = str(event_id).strip()
-    url = (
-        f"{FEEDBACK_FORM_URL}?event_id={quote_plus(event_id)}"
-        f"&title={quote_plus(safe_title)}"
-    )
+    url = f"{FEEDBACK_FORM_URL}?event_id={quote_plus(event_id)}" f"&title={quote_plus(safe_title)}"
     return f'<a href="{html.escape(url)}" target="_blank" rel="noopener noreferrer">Feedback</a>'
 
 
@@ -641,8 +651,12 @@ def load_data(urlname):
                 "Speakers": format_speakers(e["node"].get("speakerDetails")),
             }
         )
-    df_up = pd.DataFrame(upcoming_rows) if upcoming_rows else pd.DataFrame(
-        columns=["Event ID", "Event Title", "Date and Time", "Event URL", "Online?", "Speakers"]
+    df_up = (
+        pd.DataFrame(upcoming_rows)
+        if upcoming_rows
+        else pd.DataFrame(
+            columns=["Event ID", "Event Title", "Date and Time", "Event URL", "Online?", "Speakers"]
+        )
     )
 
     # --- Past ---
@@ -845,6 +859,7 @@ if __name__ == "__main__":
     except Exception as e:
         logger.warning("Sidebar logo render failed: %s", e)
 
+
 def main():
     st.set_page_config(page_title="DEP Meetup Dashboard", layout="wide")
 
@@ -853,10 +868,14 @@ def main():
         os.environ["DEP_PAGE"] = "all"
 
     PAGE_VIEW = (
-        st.session_state.get("DEP_PAGE")
-        if "DEP_PAGE" in st.session_state
-        else os.getenv("DEP_PAGE", "all")
-    ).strip().lower()
+        (
+            st.session_state.get("DEP_PAGE")
+            if "DEP_PAGE" in st.session_state
+            else os.getenv("DEP_PAGE", "all")
+        )
+        .strip()
+        .lower()
+    )
 
     dashboard = get_dashboard_data(URLNAME)
     df_up = dashboard["df_up"]
@@ -1133,7 +1152,6 @@ def main():
         unsafe_allow_html=True,
     )
 
-
     viewport_width = get_viewport_width()
     is_narrow = viewport_width is not None and viewport_width < 800
     if viewport_width is not None:
@@ -1189,7 +1207,9 @@ def main():
             fb = feedback_df.copy()
             fb["rating"] = pd.to_numeric(fb["rating"], errors="coerce")
             fb = fb.dropna(subset=["rating"])
-            feedback_by_event = fb.groupby("event_id", observed=True)["rating"].mean().round(1).to_dict()
+            feedback_by_event = (
+                fb.groupby("event_id", observed=True)["rating"].mean().round(1).to_dict()
+            )
             feedback_counts = fb.groupby("event_id", observed=True).size().to_dict()
 
         raw_all = pd.concat([df_up, df_past], ignore_index=True)
@@ -1198,10 +1218,14 @@ def main():
         available_years = sorted(raw_all["Date and Time"].dt.year.unique().tolist())
         past_year = None
         if not df_past.empty:
-            past_years = pd.to_datetime(df_past.get("Date and Time"), errors="coerce").dt.year.dropna()
+            past_years = pd.to_datetime(
+                df_past.get("Date and Time"), errors="coerce"
+            ).dt.year.dropna()
             if not past_years.empty:
                 past_year = int(past_years.max())
-        default_year = past_year or (available_years[-1] if available_years else pd.Timestamp.now().year)
+        default_year = past_year or (
+            available_years[-1] if available_years else pd.Timestamp.now().year
+        )
         year_index = available_years.index(default_year) if default_year in available_years else 0
         year_value = raw_year.selectbox("Filter year", options=available_years, index=year_index)
 
@@ -1238,13 +1262,14 @@ def main():
             if not df_up_filtered.empty:
                 df_up_display = df_up_filtered.copy()
                 date_fmt = "%a, %b %d, %Y" if compact_view else "%a, %b %d, %Y %I:%M %p"
-                df_up_display["Date and Time"] = pd.to_datetime(df_up_display["Date and Time"]).dt.strftime(
-                    date_fmt
-                )
+                df_up_display["Date and Time"] = pd.to_datetime(
+                    df_up_display["Date and Time"]
+                ).dt.strftime(date_fmt)
                 df_up_display["Event Title"] = df_up_display.apply(
                     lambda row: format_event_link(row["Event Title"], row["Event URL"]),
                     axis=1,
                 )
+
                 def _event_feedback_cell(row):
                     event_id = str(row.get("Event ID", "")).strip()
                     link = format_feedback_link(event_id, row.get("Event Title", ""))
@@ -1259,8 +1284,12 @@ def main():
                 if compact_view:
                     df_up_display = df_up_display[["Event Title", "Date and Time", "Feedback"]]
                 else:
-                    df_up_display = df_up_display.drop(columns=["Event URL", "Event ID"], errors="ignore")
-                render_responsive_table(df_up_display, allow_html_columns=["Event Title", "Feedback"])
+                    df_up_display = df_up_display.drop(
+                        columns=["Event URL", "Event ID"], errors="ignore"
+                    )
+                render_responsive_table(
+                    df_up_display, allow_html_columns=["Event Title", "Feedback"]
+                )
             else:
                 st.info("No upcoming events found.")
 
@@ -1273,11 +1302,14 @@ def main():
                     "Date and Time", ascending=False
                 ).reset_index(drop=True)
                 date_fmt = "%a, %b %d, %Y" if compact_view else "%a, %b %d, %Y %I:%M %p"
-                df_past_display["Date and Time"] = df_past_display["Date and Time"].dt.strftime(date_fmt)
+                df_past_display["Date and Time"] = df_past_display["Date and Time"].dt.strftime(
+                    date_fmt
+                )
                 df_past_display["Event Title"] = df_past_display.apply(
                     lambda row: format_event_link(row["Event Title"], row["Event URL"]),
                     axis=1,
                 )
+
                 def _event_feedback_cell(row):
                     event_id = str(row.get("Event ID", "")).strip()
                     link = format_feedback_link(event_id, row.get("Event Title", ""))
@@ -1297,7 +1329,9 @@ def main():
                     df_past_display = df_past_display.drop(
                         columns=["Event URL", "Event ID"], errors="ignore"
                     )
-                render_responsive_table(df_past_display, allow_html_columns=["Event Title", "Feedback"])
+                render_responsive_table(
+                    df_past_display, allow_html_columns=["Event Title", "Feedback"]
+                )
             else:
                 st.info("No past events found.")
 
@@ -1317,7 +1351,9 @@ def main():
                     f"<div style='margin-bottom:8px;'>Existing feedback: {total_ratings} rating{'s' if total_ratings != 1 else ''} submitted, average score {avg_score:.1f}</div>",
                     unsafe_allow_html=True,
                 )
-            event_options = ["-- Select event --"] + [f"{eid} — {title}" for eid, title in event_map.items()]
+            event_options = ["-- Select event --"] + [
+                f"{eid} — {title}" for eid, title in event_map.items()
+            ]
             star_options = [
                 "⭐☆☆☆☆ (1)",
                 "⭐⭐☆☆☆ (2)",
@@ -1389,9 +1425,10 @@ def main():
         )
 
         display_df = fb["event_id event_title rating comment submitted_at".split()].copy()
-        display_df["submitted_at"] = display_df["submitted_at"].dt.strftime("%Y-%m-%d %H:%M UTC").fillna("")
+        display_df["submitted_at"] = (
+            display_df["submitted_at"].dt.strftime("%Y-%m-%d %H:%M UTC").fillna("")
+        )
         render_responsive_table(display_df)
-
 
     # --- Insights / Story ---
     if PAGE_VIEW in ("all", "insights"):
@@ -1440,7 +1477,7 @@ def main():
     **Important note**
     - This score supports decisions, but it should be read with the detailed KPIs and charts below.
     """)
-            
+
         st.subheader("Community Insights")
 
         if df_past.empty and df_up.empty:
@@ -1471,9 +1508,7 @@ def main():
                     next_event["Date and Time"], errors="coerce"
                 )
                 next_event = (
-                    next_event.dropna(subset=["Date and Time"])
-                    .sort_values("Date and Time")
-                    .head(1)
+                    next_event.dropna(subset=["Date and Time"]).sort_values("Date and Time").head(1)
                 )
                 next_event = next_event.iloc[0] if not next_event.empty else df_up.iloc[0]
                 next_dt = pd.to_datetime(next_event.get("Date and Time"), errors="coerce")
@@ -1495,7 +1530,6 @@ def main():
                     f"Next event: **[{next_event['Event Title']}]({next_event['Event URL']})** "
                     f"on **{next_dt_str}** | **{mode_text}**{speaker_text}"
                 )
-
 
     # --- Metrics ---
     if PAGE_VIEW in ("all", "kpi"):
@@ -1553,7 +1587,9 @@ def main():
                 "Nov",
                 "Dec",
             ]
-            monthly["Month"] = pd.Categorical(monthly["Month"], categories=month_order, ordered=True)
+            monthly["Month"] = pd.Categorical(
+                monthly["Month"], categories=month_order, ordered=True
+            )
             monthly_rollup = (
                 monthly.groupby(["Year", "Month"], observed=True)["No. of Attendees"]
                 .mean()
@@ -1561,7 +1597,9 @@ def main():
             )
             monthly_rollup = monthly_rollup.sort_values(["Year", "Month"])
 
-            heatmap_data = monthly_rollup.pivot(index="Year", columns="Month", values="Avg Attendance")
+            heatmap_data = monthly_rollup.pivot(
+                index="Year", columns="Month", values="Avg Attendance"
+            )
             heatmap_data = heatmap_data.reindex(columns=month_order)
             heatmap_data.index = pd.to_numeric(heatmap_data.index, errors="coerce")
             heatmap_data = heatmap_data.sort_index(ascending=False)
@@ -1618,6 +1656,7 @@ def main():
         '<div class="footer-text">Copyright © 2026 Katherine Bulac for Data Engineering Pilipinas Community.</div>',
         unsafe_allow_html=True,
     )
+
 
 if __name__ == "__main__":
     main()
