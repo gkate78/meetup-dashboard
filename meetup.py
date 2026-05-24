@@ -122,8 +122,8 @@ if not logger.handlers:
 
 MEETUP_TOKEN = os.getenv("MEETUP_TOKEN", "").strip()
 FEEDBACK_FORM_URL = os.getenv("FEEDBACK_FORM_URL", "").strip()
-FEEDBACK_DATA_PATH = _resolve_data_path(os.getenv("FEEDBACK_DATA_PATH", "data/feedback.csv"))
-EVENT_BOOKINGS_PATH = _resolve_data_path(os.getenv("EVENT_BOOKINGS_PATH", "data/event_bookings.csv"))
+FEEDBACK_DATA_PATH = _resolve_data_path(os.getenv("FEEDBACK_DATA_PATH", "data/feedback.db"))
+EVENT_BOOKINGS_PATH = _resolve_data_path(os.getenv("EVENT_BOOKINGS_PATH", "data/event_bookings.db"))
 if not MEETUP_TOKEN:
     try:
         MEETUP_TOKEN = st.secrets["MEETUP_TOKEN"].strip()
@@ -202,8 +202,54 @@ query getPastGroupEvents($urlname: String!, $first: Int!, $after: String) {
 """
 
 
+def _is_sqlite_path(path: str) -> bool:
+    return os.path.splitext(str(path).lower())[1] in {".db", ".sqlite", ".sqlite3"}
+
+
+def _ensure_feedback_sqlite_schema(path: str) -> None:
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    import sqlite3
+
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS feedback (
+                event_id TEXT,
+                event_title TEXT,
+                rating REAL,
+                comment TEXT,
+                submitted_at TEXT
+            )
+            """
+        )
+        conn.commit()
+
+
+def _load_feedback_from_sqlite(path: str) -> pd.DataFrame:
+    import sqlite3
+
+    if not os.path.exists(path):
+        return pd.DataFrame(columns=["event_id", "event_title", "rating", "comment", "submitted_at"])
+    _ensure_feedback_sqlite_schema(path)
+    try:
+        with sqlite3.connect(path) as conn:
+            return pd.read_sql_query("SELECT * FROM feedback", conn)
+    except Exception as exc:
+        logger.warning("Unable to load feedback data from SQLite %s: %s", path, exc)
+        return pd.DataFrame(columns=["event_id", "event_title", "rating", "comment", "submitted_at"])
+
+
 def load_feedback_data(path):
     columns = ["event_id", "event_title", "rating", "comment", "submitted_at"]
+    if _is_sqlite_path(path):
+        fb = _load_feedback_from_sqlite(path)
+        if "event_id" not in fb.columns or "rating" not in fb.columns:
+            return pd.DataFrame(columns=columns)
+        fb["event_id"] = fb["event_id"].astype(str).str.strip()
+        return fb
+
     if not os.path.exists(path):
         return pd.DataFrame(columns=columns)
     try:
@@ -229,8 +275,21 @@ def load_feedback_data(path):
 
 
 def save_feedback_data(path, record):
+    columns = ["event_id", "event_title", "rating", "comment", "submitted_at"]
+    if _is_sqlite_path(path):
+        _ensure_feedback_sqlite_schema(path)
+        import sqlite3
+
+        df = pd.DataFrame([record], columns=columns)
+        try:
+            with sqlite3.connect(path) as conn:
+                df.to_sql("feedback", conn, if_exists="append", index=False)
+        except Exception as exc:
+            logger.warning("Unable to save feedback data to SQLite %s: %s", path, exc)
+        return
+
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    df = pd.DataFrame([record])
+    df = pd.DataFrame([record], columns=columns)
     header = not os.path.exists(path) or os.path.getsize(path) == 0
     df.to_csv(path, mode="a", index=False, header=header)
 

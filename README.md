@@ -45,7 +45,7 @@ If you want automated snapshot refreshes (recommended to avoid live API hits), a
 ## Data files
 The app expects these runtime files to be writable:
 - `SNAPSHOT_PATH` for cached dashboard snapshots when `SNAPSHOT_BACKEND=file`
-- `FEEDBACK_DATA_PATH` for submitted feedback rows
+- `FEEDBACK_DATA_PATH` for submitted feedback rows (SQLite `.db` recommended; CSV legacy supported)
 - `SPEAKER_OVERRIDES_PATH` for manual speaker normalization overrides
 - `EVENT_BOOKINGS_PATH` for speaker booking requests
 
@@ -84,7 +84,7 @@ Snapshot backend settings:
 
 Feedback settings:
 - `FEEDBACK_FORM_URL` (default empty)
-- `FEEDBACK_DATA_PATH` (default `data/feedback.csv`)
+- `FEEDBACK_DATA_PATH` (default `data/feedback.db`; legacy `data/feedback.csv` is also supported)
 
 Speaker overrides for missing past speakers:
 - `SPEAKER_OVERRIDES_PATH` (default `data/speaker_overrides.csv`)

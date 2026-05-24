@@ -10,7 +10,9 @@ from meetup import (
     format_booking_conflict_message,
     format_event_conflict_message,
     load_event_bookings,
+    load_feedback_data,
     save_event_booking,
+    save_feedback_data,
     update_event_booking_status,
     slot_conflict_mask,
 )
@@ -64,6 +66,27 @@ def test_event_booking_roundtrip_sqlite(tmp_path):
     assert int(bookings.iloc[0]["duration_minutes"]) == 60
     assert bookings.iloc[0]["speaker_name"] == "Ana Cruz"
     assert bookings.iloc[0]["talk_title"] == "Building Reliable Pipelines"
+
+
+def test_feedback_storage_roundtrip_sqlite(tmp_path):
+    path = tmp_path / "feedback.db"
+    record = {
+        "event_id": "evt-1",
+        "event_title": "DEP Meetup",
+        "rating": 4.5,
+        "comment": "Great session",
+        "submitted_at": "2026-05-21T00:00:00Z",
+    }
+
+    save_feedback_data(str(path), record)
+    feedback = load_feedback_data(str(path))
+
+    assert len(feedback) == 1
+    assert feedback.iloc[0]["event_id"] == "evt-1"
+    assert float(feedback.iloc[0]["rating"]) == 4.5
+    assert feedback.iloc[0]["event_title"] == "DEP Meetup"
+    assert feedback.iloc[0]["comment"] == "Great session"
+    assert feedback.iloc[0]["submitted_at"] == "2026-05-21T00:00:00Z"
 
 
 def test_load_event_bookings_recovers_mixed_schema(tmp_path):
