@@ -7,6 +7,7 @@ import random
 import re
 import time
 from datetime import date, datetime, time, timezone
+from typing import Any
 from urllib.parse import quote_plus, urlparse
 
 ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -94,7 +95,7 @@ def get_viewport_width():
 API_URL = "https://api.meetup.com/gql-ext"
 URLNAME = "data-engineering-pilipinas"
 SPEAKER_OVERRIDES_PATH = _resolve_data_path(os.getenv("SPEAKER_OVERRIDES_PATH", "data/speaker_overrides.db"))
-SNAPSHOT_PATH = _resolve_data_path(os.getenv("SNAPSHOT_PATH", "cache/meetup_snapshot.json"))
+SNAPSHOT_PATH = _resolve_data_path(os.getenv("SNAPSHOT_PATH", "cache/meetup_snapshot.db"))
 SNAPSHOT_BACKEND = os.getenv("SNAPSHOT_BACKEND", "file").strip().lower()
 SNAPSHOT_S3_BUCKET = os.getenv("SNAPSHOT_S3_BUCKET", "").strip()
 SNAPSHOT_S3_KEY = os.getenv("SNAPSHOT_S3_KEY", "meetup/meetup_snapshot.json").strip()
@@ -239,6 +240,56 @@ def _load_feedback_from_sqlite(path: str) -> pd.DataFrame:
     except Exception as exc:
         logger.warning("Unable to load feedback data from SQLite %s: %s", path, exc)
         return pd.DataFrame(columns=["event_id", "event_title", "rating", "comment", "submitted_at"])
+
+
+def _ensure_snapshot_sqlite_schema(path: str) -> None:
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    import sqlite3
+
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS snapshot (
+                saved_at TEXT,
+                member_count INTEGER,
+                payload_json TEXT
+            )
+            """
+        )
+        conn.commit()
+
+
+def _save_snapshot_to_sqlite(path: str, payload: dict[str, Any]) -> None:
+    import sqlite3
+
+    _ensure_snapshot_sqlite_schema(path)
+    json_text = json.dumps(payload, ensure_ascii=False)
+    with sqlite3.connect(path) as conn:
+        conn.execute("DELETE FROM snapshot")
+        conn.execute(
+            "INSERT INTO snapshot (saved_at, member_count, payload_json) VALUES (?, ?, ?)",
+            (payload.get("saved_at"), int(payload.get("member_count", 0)), json_text),
+        )
+        conn.commit()
+
+
+def _load_snapshot_from_sqlite(path: str) -> dict[str, Any] | None:
+    import sqlite3
+
+    if not os.path.exists(path):
+        return None
+    try:
+        _ensure_snapshot_sqlite_schema(path)
+        with sqlite3.connect(path) as conn:
+            row = conn.execute("SELECT payload_json FROM snapshot LIMIT 1").fetchone()
+        if not row or not row[0]:
+            return None
+        return json.loads(row[0])
+    except Exception as exc:
+        logger.warning("Unable to load snapshot data from SQLite %s: %s", path, exc)
+        return None
 
 
 def load_feedback_data(path):
@@ -1183,7 +1234,7 @@ def _get_s3_client():
 
 def save_snapshot(df_up, df_past, member_count):
     payload = {
-        "saved_at": pd.Timestamp.utcnow().isoformat(),
+        "saved_at": pd.Timestamp.now(tz="UTC").isoformat(),
         "member_count": int(member_count or 0),
         "upcoming": df_up.to_dict(orient="records"),
         "past": df_past.to_dict(orient="records"),
@@ -1200,6 +1251,10 @@ def save_snapshot(df_up, df_past, member_count):
             )
             return
         logger.warning("S3 snapshot backend requested but unavailable. Falling back to file.")
+
+    if _is_sqlite_path(SNAPSHOT_PATH):
+        _save_snapshot_to_sqlite(SNAPSHOT_PATH, payload)
+        return
 
     directory = os.path.dirname(SNAPSHOT_PATH)
     if directory:
@@ -1222,10 +1277,13 @@ def load_snapshot():
                 logger.warning("Unable to load S3 snapshot: %s", e)
 
     if payload is None:
-        if not os.path.exists(SNAPSHOT_PATH):
-            return None
-        with open(SNAPSHOT_PATH, encoding="utf-8") as f:
-            payload = json.load(f)
+        if _is_sqlite_path(SNAPSHOT_PATH):
+            payload = _load_snapshot_from_sqlite(SNAPSHOT_PATH)
+        if payload is None:
+            if not os.path.exists(SNAPSHOT_PATH):
+                return None
+            with open(SNAPSHOT_PATH, encoding="utf-8") as f:
+                payload = json.load(f)
 
     df_up = pd.DataFrame(payload.get("upcoming", []))
     df_past = pd.DataFrame(payload.get("past", []))
@@ -1309,7 +1367,7 @@ def get_dashboard_data(urlname):
 
 
 def render_feedback_submission(feedback_df, df_up, df_past):
-    event_list = pd.concat([df_up, df_past], ignore_index=True)
+    event_list = df_past.copy()
     event_list = event_list.dropna(subset=["Event ID", "Event Title"]).copy()
     event_list["Event ID"] = event_list["Event ID"].astype(str).str.strip()
     event_list["Event Title"] = event_list["Event Title"].apply(sanitize_title)
@@ -1352,7 +1410,7 @@ def render_feedback_submission(feedback_df, df_up, df_past):
             selected_rating = st.selectbox(
                 "Rating",
                 options=star_options,
-                index=3,
+                index=4,
                 key="feedback_star_rating",
             )
             rating = selected_rating.count("⭐")

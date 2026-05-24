@@ -14,6 +14,8 @@ from meetup import (
     load_speaker_overrides,
     save_event_booking,
     save_feedback_data,
+    save_snapshot,
+    load_snapshot,
     update_event_booking_status,
     slot_conflict_mask,
 )
@@ -88,6 +90,36 @@ def test_feedback_storage_roundtrip_sqlite(tmp_path):
     assert feedback.iloc[0]["event_title"] == "DEP Meetup"
     assert feedback.iloc[0]["comment"] == "Great session"
     assert feedback.iloc[0]["submitted_at"] == "2026-05-21T00:00:00Z"
+
+
+def test_snapshot_storage_roundtrip_sqlite(tmp_path):
+    path = tmp_path / "meetup_snapshot.db"
+    import pandas as pd
+    import meetup
+
+    meetup.SNAPSHOT_PATH = str(path)
+
+    df_up = pd.DataFrame(
+        [
+            {"id": "evt-1", "title": "Future Meetup", "date": "2026-06-01"}
+        ]
+    )
+    df_past = pd.DataFrame(
+        [
+            {"id": "evt-0", "title": "Past Meetup", "date": "2026-04-01"}
+        ]
+    )
+
+    save_snapshot(df_up, df_past, member_count=1200)
+    snapshot = load_snapshot()
+
+    assert snapshot is not None
+    assert snapshot["member_count"] == 1200
+    assert snapshot["saved_at"] is not None
+    assert len(snapshot["df_up"]) == 1
+    assert len(snapshot["df_past"]) == 1
+    assert snapshot["df_up"].iloc[0]["title"] == "Future Meetup"
+    assert snapshot["df_past"].iloc[0]["title"] == "Past Meetup"
 
 
 def test_load_speaker_overrides_sqlite(tmp_path):

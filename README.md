@@ -78,7 +78,7 @@ Optional reliability/config knobs:
 
 Snapshot backend settings:
 - `SNAPSHOT_BACKEND=file|s3` (default `file`)
-- `SNAPSHOT_PATH` (default `cache/meetup_snapshot.json`)
+- `SNAPSHOT_PATH` (default `cache/meetup_snapshot.db`, legacy `cache/meetup_snapshot.json` still supported)
 - `SNAPSHOT_S3_BUCKET` (required if backend is `s3`)
 - `SNAPSHOT_S3_KEY` (default `meetup/meetup_snapshot.json`)
 
@@ -118,7 +118,7 @@ Use mounted storage for the runtime files and point the app at those paths:
 - `FEEDBACK_DATA_PATH` -> mounted `feedback.db` (SQLite) or `feedback.csv`
 - `SPEAKER_OVERRIDES_PATH` -> mounted `speaker_overrides.db` (SQLite) or `speaker_overrides.csv`
 - `EVENT_BOOKINGS_PATH` -> mounted `event_bookings.db` (SQLite) or `event_bookings.csv`
-- `SNAPSHOT_PATH` -> mounted cache path if you want file-based snapshots
+- `SNAPSHOT_PATH` -> mounted cache path if you want file-based snapshots (SQLite `.db` or legacy `.json` supported)
 
 Keep `FEEDBACK_FORM_URL` empty if you want only the in-app feedback page. If you reuse this pattern in another project, the deploy only needs the same environment variables and writable data paths.
 
