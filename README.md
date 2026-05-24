@@ -27,11 +27,41 @@ To run the app in a new project, you need:
 - Persistent storage for feedback, speaker override, and speaker booking CSV files if you want those features enabled
 
 ## Local setup
+1. Copy example environment variables:
+
+```bash
+cp .env.example .env
+```
+
+2. Create and activate a virtual environment:
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+```
+
+3. Install dependencies:
+
+```bash
 pip install -r requirements.txt
+```
+
+4. Run the app locally:
+
+```bash
+make run
+```
+
+Alternative local run with Streamlit directly:
+
+```bash
 streamlit run meetup.py
+```
+
+You can also use Docker Compose for local development:
+
+```bash
+docker compose up --build
 ```
 
 You can override the data cache TTL to reduce API calls during development or testing. Example (24h cache):
