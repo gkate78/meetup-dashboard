@@ -1,31 +1,10 @@
-#!/usr/bin/env python3
-"""Fetch dashboard data and persist snapshot using the app's logic.
+import os
+import sys
 
-This script is intended to be run from CI (GitHub Actions) or a cron job.
-It imports the shared `meetup` module and triggers the dashboard data fetch,
-which will save a snapshot via the configured `SNAPSHOT_BACKEND`.
-"""
+ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(ROOT_DIR, "src"))
 
-import logging
-
-from meetup import URLNAME, get_dashboard_data
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("fetch_snapshot")
-
-
-def main():
-    logger.info("Starting snapshot fetch for %s", URLNAME)
-    try:
-        dashboard = get_dashboard_data(URLNAME)
-        logger.info(
-            "Snapshot fetch complete. source=%s saved_at=%s",
-            dashboard.get("source"),
-            dashboard.get("saved_at"),
-        )
-    except Exception as e:
-        logger.exception("Snapshot fetch failed: %s", e)
-
+from meetup_dashboard.snapshot import main
 
 if __name__ == "__main__":
     main()

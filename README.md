@@ -148,12 +148,19 @@ pytest -q
 
 ## Project layout
 ```text
-meetup.py                  # Streamlit app UI + data loading
-meetup_metrics.py          # Analytics functions (testable core)
-fetch_snapshot.py          # Scheduled snapshot fetch helper
+src/meetup_dashboard/
+  ├── __init__.py
+  ├── app.py                # Streamlit app UI + data loading
+  ├── bookings.py           # Speaker booking persistence and conflict helpers
+  ├── metrics.py            # Speaker leaderboard and pulse scoring
+  ├── snapshot.py           # Snapshot refresh helper
+  └── services/             # Future service modules
+meetup.py                  # Root Streamlit entrypoint wrapper
+fetch_snapshot.py          # Root snapshot fetch wrapper
 pages/06_Feedback.py       # Dedicated Feedback page entrypoint
 pages/07_Booking_Calendar.py # Dedicated Booking Calendar page entrypoint
-tests/test_meetup_metrics.py
+docs/
+tests/
 .github/workflows/ci.yml
 .github/workflows/snapshot.yml
 ```

@@ -1,12 +1,6 @@
-import os
-import sys
-
 import pandas as pd
 
-# Ensure root package path is available for CI test collection
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from meetup_metrics import build_sparkline, build_speaker_leaderboard, compute_pulse, safe_metric
+from meetup_dashboard.metrics import build_sparkline, build_speaker_leaderboard, compute_pulse, safe_metric
 
 
 def test_safe_metric_mean_handles_nan():

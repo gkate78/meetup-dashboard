@@ -1,0 +1,13 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app:delegated
+    environment:
+      - PORT=8501
+      - STREAMLIT_SERVER_RUN_ON_SAVE=true
+    command: ["streamlit", "run", "meetup.py", "--server.port=8501", "--server.address=0.0.0.0"]

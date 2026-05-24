@@ -1,23 +1,20 @@
-import os
-import sys
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from meetup import (
+from meetup_dashboard.bookings import (
     booking_conflict_mask,
     first_event_conflict_row,
     first_booking_conflict,
     format_booking_conflict_message,
     format_event_conflict_message,
     load_event_bookings,
+    save_event_booking,
+    slot_conflict_mask,
+    update_event_booking_status,
+)
+from meetup_dashboard.app import (
     load_feedback_data,
     load_speaker_overrides,
-    save_event_booking,
+    load_snapshot,
     save_feedback_data,
     save_snapshot,
-    load_snapshot,
-    update_event_booking_status,
-    slot_conflict_mask,
 )
 
 
@@ -95,9 +92,10 @@ def test_feedback_storage_roundtrip_sqlite(tmp_path):
 def test_snapshot_storage_roundtrip_sqlite(tmp_path):
     path = tmp_path / "meetup_snapshot.db"
     import pandas as pd
-    import meetup
 
-    meetup.SNAPSHOT_PATH = str(path)
+    from meetup_dashboard import app as meetup_app
+
+    meetup_app.SNAPSHOT_PATH = str(path)
 
     df_up = pd.DataFrame(
         [

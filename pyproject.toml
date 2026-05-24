@@ -15,5 +15,9 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
-files = ["meetup_metrics.py"]
+files = ["src/meetup_dashboard"]
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
