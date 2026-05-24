@@ -6,6 +6,7 @@ Streamlit analytics app for Data Engineering Pilipinas Meetup data, powered by M
 - Pulls upcoming and past events from Meetup GraphQL.
 - Tracks attendance trends, monthly heatmap, KPI metrics, and speaker leaderboard.
 - Includes a community feedback page with runtime feedback storage.
+- Includes a Booking Calendar page for the full DEP schedule and speaker booking requests, with popup booking form validation and preserved entries on invalid submit.
 - Computes a weighted `Community Pulse Score` for quick health monitoring.
 - Uses resilient data loading with retries and snapshot fallback.
 - Normalizes speaker names and excludes missing placeholders (for example: `nan`, `none`, `null`, `-`) from ranking.
@@ -23,7 +24,7 @@ To run the app in a new project, you need:
 - A Meetup GraphQL token
 - Python 3.11+
 - A writable snapshot path or S3 bucket for cached Meetup data
-- Persistent storage for feedback and speaker override CSV files if you want those features enabled
+- Persistent storage for feedback, speaker override, and speaker booking CSV files if you want those features enabled
 
 ## Local setup
 ```bash
@@ -46,6 +47,7 @@ The app expects these runtime files to be writable:
 - `SNAPSHOT_PATH` for cached dashboard snapshots when `SNAPSHOT_BACKEND=file`
 - `FEEDBACK_DATA_PATH` for submitted feedback rows
 - `SPEAKER_OVERRIDES_PATH` for manual speaker normalization overrides
+- `EVENT_BOOKINGS_PATH` for speaker booking requests
 
 Recommended initial schemas:
 ```csv
@@ -56,6 +58,11 @@ event_id,event_title,rating,comment,submitted_at
 ```csv
 # speaker_overrides.csv
 event_id,canonical_speakers,source,notes
+```
+
+```csv
+# event_bookings.csv
+requested_datetime,duration_minutes,speaker_name,email,talk_title,talk_summary,preferred_format,availability_notes,status,submitted_at
 ```
 
 ## Secrets and environment variables
@@ -86,6 +93,18 @@ Speaker overrides for missing past speakers:
 - Rule: Meetup speaker names are kept; overrides are used only when past event speakers are missing.
 - Missing speaker names are rendered as blank in event tables/UI.
 
+Speaker booking requests:
+- `EVENT_BOOKINGS_PATH` (default `data/event_bookings.csv`)
+- Required columns: `requested_datetime`, `speaker_name`, `email`, `talk_title`, `submitted_at`
+- Optional columns: `duration_minutes`, `talk_summary`, `preferred_format`, `availability_notes`, `status`
+- Status values currently used in the app: `Requested`, `Tentative`, `Confirmed`, `Cancelled`
+- The Booking Calendar page appends each new request to the CSV and keeps it in persistent storage.
+- Future bookings are checked against existing requests and against a default DEP event window to reduce double booking.
+- The booking modal preserves entered values when a submission fails validation or conflicts, so users do not lose their input.
+- Email addresses are validated before a request is saved.
+- The booking form includes a duration in minutes so organizers can avoid overlap on the same time window.
+- Booking status can be updated from the Booking Calendar page using the "Update booking status" panel in Recent requests.
+
 ## Deployment runbook
 ### Streamlit Community Cloud
 1. Push this folder to GitHub.
@@ -98,6 +117,7 @@ Use mounted storage for the runtime files and point the app at those paths:
 
 - `FEEDBACK_DATA_PATH` -> mounted `feedback.csv`
 - `SPEAKER_OVERRIDES_PATH` -> mounted `speaker_overrides.csv`
+- `EVENT_BOOKINGS_PATH` -> mounted `event_bookings.csv`
 - `SNAPSHOT_PATH` -> mounted cache path if you want file-based snapshots
 
 Keep `FEEDBACK_FORM_URL` empty if you want only the in-app feedback page. If you reuse this pattern in another project, the deploy only needs the same environment variables and writable data paths.
@@ -108,6 +128,7 @@ Keep `FEEDBACK_FORM_URL` empty if you want only the in-app feedback page. If you
 3. Confirm event links open correctly and no table rendering breaks on special characters.
 4. Confirm charts render on desktop and mobile viewport.
 5. Confirm speaker leaderboard does not include placeholder values such as `nan` or `-`.
+6. Confirm the Booking Calendar page can append a booking request to persistent storage.
 
 ## Quality gates
 This repo includes CI checks:
@@ -131,6 +152,7 @@ meetup.py                  # Streamlit app UI + data loading
 meetup_metrics.py          # Analytics functions (testable core)
 fetch_snapshot.py          # Scheduled snapshot fetch helper
 pages/06_Feedback.py       # Dedicated Feedback page entrypoint
+pages/07_Booking_Calendar.py # Dedicated Booking Calendar page entrypoint
 tests/test_meetup_metrics.py
 .github/workflows/ci.yml
 .github/workflows/snapshot.yml

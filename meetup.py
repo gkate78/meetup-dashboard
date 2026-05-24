@@ -6,8 +6,17 @@ import os
 import random
 import re
 import time
-from datetime import datetime
+from datetime import date, datetime, time, timezone
 from urllib.parse import quote_plus, urlparse
+
+ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
+
+def _resolve_data_path(path: str) -> str:
+    value = str(path or "").strip()
+    if not value:
+        return ""
+    value = os.path.expanduser(value)
+    return value if os.path.isabs(value) else os.path.abspath(os.path.join(ROOT_DIR, value))
 
 import pandas as pd
 import plotly.express as px
@@ -16,6 +25,20 @@ import streamlit as st
 import streamlit.components.v1 as components
 from streamlit.errors import StreamlitSecretNotFoundError
 
+from event_bookings import (
+    DEFAULT_EVENT_DURATION_MINUTES,
+    DEP_EVENT_TZ,
+    booking_conflict_mask,
+    first_booking_conflict,
+    first_event_conflict_row,
+    format_booking_conflict_message,
+    format_event_conflict_message,
+    load_event_bookings,
+    save_event_booking,
+    save_event_bookings,
+    slot_conflict_mask,
+    update_event_booking_status,
+)
 from meetup_metrics import build_speaker_leaderboard, compute_pulse, safe_metric
 
 
@@ -70,8 +93,8 @@ def get_viewport_width():
 
 API_URL = "https://api.meetup.com/gql-ext"
 URLNAME = "data-engineering-pilipinas"
-SPEAKER_OVERRIDES_PATH = os.getenv("SPEAKER_OVERRIDES_PATH", "data/speaker_overrides.csv")
-SNAPSHOT_PATH = os.getenv("SNAPSHOT_PATH", "cache/meetup_snapshot.json")
+SPEAKER_OVERRIDES_PATH = _resolve_data_path(os.getenv("SPEAKER_OVERRIDES_PATH", "data/speaker_overrides.csv"))
+SNAPSHOT_PATH = _resolve_data_path(os.getenv("SNAPSHOT_PATH", "cache/meetup_snapshot.json"))
 SNAPSHOT_BACKEND = os.getenv("SNAPSHOT_BACKEND", "file").strip().lower()
 SNAPSHOT_S3_BUCKET = os.getenv("SNAPSHOT_S3_BUCKET", "").strip()
 SNAPSHOT_S3_KEY = os.getenv("SNAPSHOT_S3_KEY", "meetup/meetup_snapshot.json").strip()
@@ -82,14 +105,10 @@ REQUEST_TIMEOUT = (
 MAX_RETRIES = int(os.getenv("API_MAX_RETRIES", "4"))
 RETRY_BASE_SECONDS = float(os.getenv("API_RETRY_BASE_SECONDS", "1.5"))
 PAGE_VIEW = (
-    (
-        st.session_state.get("DEP_PAGE")
-        if "DEP_PAGE" in st.session_state
-        else os.getenv("DEP_PAGE", "all")
-    )
-    .strip()
-    .lower()
-)
+    st.session_state.get("DEP_PAGE")
+    if "DEP_PAGE" in st.session_state
+    else os.getenv("DEP_PAGE", "all")
+).strip().lower()
 
 # How long to cache dashboard data (seconds). Increase to reduce API calls.
 # Default to 24 hours since the meetup data doesn't change frequently.
@@ -103,7 +122,8 @@ if not logger.handlers:
 
 MEETUP_TOKEN = os.getenv("MEETUP_TOKEN", "").strip()
 FEEDBACK_FORM_URL = os.getenv("FEEDBACK_FORM_URL", "").strip()
-FEEDBACK_DATA_PATH = os.getenv("FEEDBACK_DATA_PATH", "data/feedback.csv").strip()
+FEEDBACK_DATA_PATH = _resolve_data_path(os.getenv("FEEDBACK_DATA_PATH", "data/feedback.csv"))
+EVENT_BOOKINGS_PATH = _resolve_data_path(os.getenv("EVENT_BOOKINGS_PATH", "data/event_bookings.csv"))
 if not MEETUP_TOKEN:
     try:
         MEETUP_TOKEN = st.secrets["MEETUP_TOKEN"].strip()
@@ -384,130 +404,472 @@ def render_monthly_calendar(
                 )
         return
 
+    st.info("Use Month Grid view on the calendar page for interactive booking.")
+
+
+def _localize_to_event_tz(dt):
+    if pd.isna(dt):
+        return dt
+    if dt.tzinfo is None:
+        return dt.tz_localize(DEP_EVENT_TZ)
+    return dt.tz_convert(DEP_EVENT_TZ)
+
+
+def _event_day_tooltip(events, feedback_by_event):
+    lines = []
+    for event in events:
+        title = sanitize_title(event.get("Event Title", "Untitled"))
+        dt = pd.to_datetime(event.get("Date and Time"), errors="coerce")
+        if not pd.isna(dt):
+            dt = _localize_to_event_tz(dt)
+        time_label = dt.strftime("%B %d, %Y %I:%M %p") if not pd.isna(dt) else "TBD"
+        lines.append(f"{time_label} — {title}")
+    return html.escape(" • ".join(lines))
+
+
+def _calendar_day_state(day, selected_month, events_by_day, today):
+    if day.month != selected_month:
+        return "other-month"
+    has_events = day in events_by_day
+    if day < today:
+        return "past-event" if has_events else "past"
+    if has_events:
+        return "event"
+    return "open"
+
+
+def _past_day_tooltip(day):
+    return html.escape(f"{day.strftime('%B %d, %Y')} — past date (not bookable)")
+
+
+def _booking_requests_tooltip(bookings):
+    if not bookings:
+        return ""
+    lines = []
+    for booking in bookings:
+        start_ts = pd.to_datetime(booking.get("requested_datetime"), errors="coerce")
+        if pd.isna(start_ts):
+            continue
+        start_ts = _localize_to_event_tz(start_ts)
+        duration_minutes = int(booking.get("duration_minutes") or DEFAULT_EVENT_DURATION_MINUTES)
+        end_ts = start_ts + pd.Timedelta(minutes=duration_minutes)
+        speaker = sanitize_title(booking.get("speaker_name", "")).strip()
+        status = str(booking.get("status", "Requested")).strip()
+        speaker_part = f" by {speaker}" if speaker else ""
+        lines.append(
+            f"{start_ts.strftime('%I:%M %p')}–{end_ts.strftime('%I:%M %p')}{speaker_part} [{status}]"
+        )
+    return html.escape(" • ".join(lines))
+
+
+def render_booking_request_form(events_df, default_date=None, form_key="booking_request_form"):
+    bookings = load_event_bookings(EVENT_BOOKINGS_PATH)
+    default_day = default_date or date.today()
+    if isinstance(default_day, str):
+        default_day = pd.to_datetime(default_date).date()
+
+    reset_flag = f"{form_key}_reset"
+    saved_flag = "booking_request_saved"
+    success_message = st.session_state.pop(saved_flag, False)
+
+    if st.session_state.get(reset_flag):
+        for field in [
+            f"{form_key}_date",
+            f"{form_key}_time",
+            f"{form_key}_duration",
+            f"{form_key}_speaker",
+            f"{form_key}_email",
+            f"{form_key}_title",
+            f"{form_key}_summary",
+            f"{form_key}_format",
+            f"{form_key}_notes",
+        ]:
+            st.session_state.pop(field, None)
+        st.session_state.pop(reset_flag, None)
+
+    with st.form(form_key):
+        if success_message:
+            st.success("Booking request saved.")
+
+        booking_date = st.date_input(
+            "Booking date",
+            value=st.session_state.get(f"{form_key}_date", default_day),
+            min_value=date.today(),
+            key=f"{form_key}_date",
+        )
+        st.markdown(f"**Request a slot on {booking_date.strftime('%B %d, %Y')}**")
+        request_time = st.time_input(
+            "Start time",
+            value=st.session_state.get(f"{form_key}_time", time(18, 0)),
+            key=f"{form_key}_time",
+        )
+        duration_minutes = st.number_input(
+            "Duration (minutes)",
+            min_value=15,
+            max_value=240,
+            value=st.session_state.get(f"{form_key}_duration", 60),
+            step=15,
+            key=f"{form_key}_duration",
+        )
+        speaker_name = st.text_input("Speaker name", key=f"{form_key}_speaker")
+        email = st.text_input(
+            "Email (private — used for organizer contact only)",
+            key=f"{form_key}_email",
+        )
+        talk_title = st.text_input("Talk title", key=f"{form_key}_title")
+        talk_summary = st.text_area("Talk summary (optional)", key=f"{form_key}_summary")
+        preferred_format = st.selectbox(
+            "Preferred format",
+            ["Online", "In-person", "Hybrid"],
+            key=f"{form_key}_format",
+            index=["Online", "In-person", "Hybrid"].index(
+                st.session_state.get(f"{form_key}_format", "Online")
+            ),
+        )
+        availability_notes = st.text_area(
+            "Availability notes (optional)",
+            key=f"{form_key}_notes",
+        )
+        submit_booking = st.form_submit_button("Submit booking request")
+
+    if submit_booking:
+        if not speaker_name.strip() or not email.strip() or not talk_title.strip():
+            st.warning("Speaker name, email, and talk title are required.")
+        elif not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email.strip()):
+            st.warning("Please enter a valid email address.")
+        else:
+            requested_dt = pd.Timestamp.combine(booking_date, request_time)
+            conflict = first_booking_conflict(bookings, requested_dt, int(duration_minutes))
+            if conflict is not None:
+                st.error(format_booking_conflict_message(conflict))
+            else:
+                event_end = requested_dt + pd.Timedelta(minutes=int(duration_minutes))
+                event_row = first_event_conflict_row(
+                    events_df,
+                    requested_dt,
+                    event_end,
+                    existing_duration_minutes=DEFAULT_EVENT_DURATION_MINUTES,
+                )
+                if event_row is not None:
+                    st.error(format_event_conflict_message(event_row))
+                else:
+                    save_event_booking(
+                        EVENT_BOOKINGS_PATH,
+                        {
+                            "requested_datetime": requested_dt.isoformat(),
+                            "duration_minutes": int(duration_minutes),
+                            "speaker_name": speaker_name.strip(),
+                            "email": email.strip(),
+                            "talk_title": talk_title.strip(),
+                            "talk_summary": str(talk_summary).strip(),
+                            "preferred_format": preferred_format,
+                            "availability_notes": str(availability_notes).strip(),
+                            "status": "Requested",
+                            "submitted_at": datetime.now(timezone.utc).isoformat(),
+                        },
+                    )
+                    _clear_booking_modal()
+                    st.session_state["booking_request_saved"] = True
+                    st.session_state[reset_flag] = True
+                    if hasattr(st, "experimental_set_query_params"):
+                        st.experimental_set_query_params()
+                    st.rerun()
+
+
+def _clear_booking_modal():
+    if "cal_modal_date" in st.session_state:
+        st.session_state.pop("cal_modal_date", None)
+    if hasattr(st, "experimental_set_query_params"):
+        st.experimental_set_query_params()
+
+
+def _render_booking_modal(events_df, default_date):
+    unique_form_key = f"booking_popup_form_{default_date.isoformat()}"
+    if hasattr(st, "modal"):
+        with st.modal("Request a booking slot", key=f"booking_modal_{default_date.isoformat()}"):
+            render_booking_request_form(events_df, default_date=default_date, form_key=unique_form_key)
+            if st.button("Cancel", key=f"booking_modal_cancel_{default_date.isoformat()}"):
+                _clear_booking_modal()
+                st.rerun()
+    else:
+        st.warning("Your browser does not support the native popup modal. The booking form is shown below.")
+        render_booking_request_form(events_df, default_date=default_date, form_key=unique_form_key)
+
+
+def _calendar_book_query_param():
+    params = st.query_params if hasattr(st, "query_params") else st.experimental_get_query_params()
+    raw = params.get("book")
+    if isinstance(raw, list):
+        raw = raw[0] if raw else None
+    return str(raw).strip() if raw else None
+
+
+def _calendar_day_meta(events, feedback_by_event, state):
+    if not events:
+        return ""
+
+    rating_values = []
+    for event in events:
+        event_id = str(event.get("Event ID", "")).strip()
+        if event_id and event_id in feedback_by_event:
+            rating_values.append(feedback_by_event[event_id])
+
+    if rating_values:
+        average_rating = sum(rating_values) / len(rating_values)
+        return f'<span class="calendar-day-meta">⭐{average_rating:.1f}</span>'
+
+    if len(events) > 1:
+        return f'<span class="calendar-day-meta">{len(events)} events</span>'
+
+    return '<span class="calendar-day-meta">•</span>'
+
+
+def _render_calendar_day_cell(day, state, events_by_day, modal_date_raw, feedback_by_event, bookings_by_day):
+    day_number = f'<span class="calendar-day-number">{day.day}</span>'
+    booking_tooltip = _booking_requests_tooltip(bookings_by_day.get(day, []))
+    if state == "open":
+        selected = " selected-open" if modal_date_raw == day.isoformat() else ""
+        href = f"?book={day.isoformat()}"
+        tooltip = f"{day.strftime('%B %d, %Y')} — available for booking."
+        if booking_tooltip:
+            tooltip = f"{tooltip} Existing requests: {booking_tooltip}"
+        return (
+            f'<a class="calendar-day-btn open-slot{selected}" href="{href}" title="{html.escape(tooltip)}">'
+            f"{day_number}</a>"
+        )
+    if state in ("event", "past-event"):
+        events = events_by_day.get(day, [])
+        tooltip = _event_day_tooltip(events, feedback_by_event)
+        if booking_tooltip:
+            tooltip = f"{tooltip} • {booking_tooltip}" if tooltip else booking_tooltip
+        btn_class = "has-event" if state == "event" else "past-event"
+        meta = _calendar_day_meta(events, feedback_by_event, state)
+        return (
+            f'<div class="calendar-day-btn {btn_class}" title="{tooltip}">{day_number}{meta}</div>'
+        )
+    if state == "past":
+        tooltip = _past_day_tooltip(day)
+        if booking_tooltip:
+            tooltip = f"{tooltip} • {booking_tooltip}"
+        return (
+            f'<div class="calendar-day-btn past-empty" title="{tooltip}">' 
+            f"{day_number}</div>"
+        )
+    return f'<div class="calendar-day-btn disabled">{day_number}</div>'
+
+
+def render_calendar_booking_grid(
+    df_events,
+    events_df,
+    selected_year,
+    selected_month,
+    feedback_df=None,
+    narrow_viewport=False,
+):
+    import calendar
+
+    book_param = _calendar_book_query_param()
+    if book_param:
+        st.session_state["cal_modal_date"] = book_param
+
+    df = df_events.copy()
+    df["Date"] = pd.to_datetime(df["Date and Time"], errors="coerce").dt.date
+    events_by_day = (
+        df.groupby("Date", observed=True).apply(lambda d: d.to_dict(orient="records")).to_dict()
+    )
+    bookings_df = load_event_bookings(EVENT_BOOKINGS_PATH)
+    bookings_df = bookings_df[~bookings_df["status"].astype(str).str.strip().str.casefold().eq("cancelled")].copy()
+    if not bookings_df.empty:
+        bookings_df["Date"] = pd.to_datetime(bookings_df["requested_datetime"], errors="coerce").dt.date
+        bookings_by_day = bookings_df.groupby("Date", observed=True).apply(lambda d: d.to_dict(orient="records")).to_dict()
+    else:
+        bookings_by_day = {}
+    feedback_by_event = {}
+    if feedback_df is not None and not feedback_df.empty:
+        fb = feedback_df.copy()
+        fb["rating"] = pd.to_numeric(fb["rating"], errors="coerce")
+        fb = fb.dropna(subset=["rating"])
+        feedback_by_event = fb.groupby("event_id", observed=True)["rating"].mean().round(1).to_dict()
+    today = pd.Timestamp.now(tz=DEP_EVENT_TZ).date()
     cal = calendar.Calendar(firstweekday=6)
     month_days = list(cal.monthdatescalendar(selected_year, selected_month))
-    params = st.query_params if hasattr(st, "query_params") else st.experimental_get_query_params()
-    raw_date = params.get("cal_date")
-    if isinstance(raw_date, list):
-        raw_date = raw_date[0] if raw_date else None
-    selected_date = None
-    if raw_date:
-        try:
-            selected_date = pd.to_datetime(raw_date).date()
-        except (TypeError, ValueError):
-            selected_date = None
-    vw_param = st.session_state.get("vw_param")
-    options = sorted(events_by_day.keys())
-    if selected_date is None and options:
-        selected_date = options[0]
+    modal_date_raw = st.session_state.get("cal_modal_date")
 
-    day_table = [
-        "<div class='calendar-grid-wrapper compact'>",
-        "<div class='calendar-month-grid compact'>",
-        "<div class='calendar-row calendar-header compact'>"
-        "<div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>"
-        "</div>",
+    table_rows = [
+        '<table class="calendar-table">',
+        '<thead><tr>'
+        '<th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th>'
+        '<th>Thu</th><th>Fri</th><th>Sat</th>'
+        '</tr></thead>',
+        '<tbody>',
     ]
-
     for week in month_days:
-        row_html = "<div class='calendar-row compact'>"
-        for d in week:
-            is_current = d.month == selected_month
-            cell_class = (
-                "calendar-day compact current-month"
-                if is_current
-                else "calendar-day compact other-month"
+        row_cells = ["<tr>"]
+        for day in week:
+            state = _calendar_day_state(day, selected_month, events_by_day, today)
+            row_cells.append(
+                '<td class="calendar-day ' +
+                ("current-month" if day.month == selected_month else "other-month") +
+                '">' +
+                _render_calendar_day_cell(day, state, events_by_day, modal_date_raw, feedback_by_event, bookings_by_day) +
+                '</td>'
             )
-            events = events_by_day.get(d, []) if is_current else []
-            has_events = bool(events)
-            highlight = " has-event" if has_events else ""
-            feedback_note = ""
-            if has_events:
-                event_feedbacks = []
-                for event in events:
-                    event_id = str(event.get("Event ID", "")).strip()
-                    if event_id in feedback_by_event:
-                        event_feedbacks.append(feedback_by_event[event_id])
-                if event_feedbacks:
-                    feedback_note = f" <span class='calendar-day-feedback'>⭐ {sum(event_feedbacks)/len(event_feedbacks):.1f}</span>"
+        row_cells.append("</tr>")
+        table_rows.append("".join(row_cells))
+    table_rows.append("</tbody></table>")
+    calendar_html = "".join(table_rows)
 
-            if is_current:
-                query_parts = []
-                if vw_param:
-                    query_parts.append(f"vw={vw_param}")
-                query_parts.append(f"cal_date={d.isoformat()}")
-                href = "?" + "&".join(query_parts) + "#calendar-details"
-                selected_class = " selected" if selected_date == d else ""
-                day_button = (
-                    f"<a class='calendar-day-btn{highlight}{selected_class}' href='{href}'>"
-                    f"{d.day}{feedback_note}</a>"
-                )
-            else:
-                day_button = f"<div class='calendar-day-btn disabled'>{d.day}</div>"
 
-            row_html += f"<div class='{cell_class}'>{day_button}</div>"
-        row_html += "</div>"
-        day_table.append(row_html)
-
-    day_table.append("</div></div>")
     st.markdown(
         """
         <style>
-        .calendar-grid-wrapper.compact { border:1px solid #dfe3e9; border-radius:12px; padding: 10px; background:#fff; box-shadow: 0 6px 16px rgba(15,23,42,0.05); }
-        .calendar-month-grid.compact { display: grid; gap: 6px; margin-bottom: 10px; }
-        .calendar-row.compact { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap: 6px; }
-        .calendar-header.compact div { background:#1d4ed8; color:#fff; font-weight:700; padding:6px 4px; border-radius:6px; text-align:center; font-size:0.72rem; letter-spacing:0.2px; white-space: nowrap; }
-        .calendar-day.compact { border:1px solid #d7e2f1; border-radius:10px; padding:6px; background:#fff; font-size:0.82rem; display:flex; align-items:center; justify-content:center; min-height:48px; }
-        .calendar-day.compact.other-month { background:#f8fafc; color:#94a3b8; }
-        .calendar-day.compact.current-month { background:#ffffff; }
-        .calendar-day-btn { width:100%; border:none; background:transparent; font-weight:700; font-size:0.9rem; color:#0f172a; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer; padding:6px 0; border-radius:8px; text-decoration:none; }
-        .calendar-day-btn.has-event { background:#e0ecff; color:#1d4ed8; box-shadow: inset 0 0 0 2px #1d4ed8; }
-        .calendar-day-btn.selected { background:#1d4ed8; color:#ffffff; box-shadow: inset 0 0 0 2px #1d4ed8; }
-        .calendar-day-btn:hover { background:#eef4ff; }
-        .calendar-day-btn.disabled { cursor:default; opacity:0.5; }
-        .calendar-day-feedback { font-size:0.7rem; color:#065f46; background:#ecfdf3; padding:1px 4px; border-radius:4px; }
-        .calendar-details { margin-top: 12px; padding: 12px 14px; border:1px solid #d7e2f1; border-radius:12px; background:#ffffff; box-shadow: 0 6px 14px rgba(15,23,42,0.06); }
-        @media (max-width: 900px) {
-            .calendar-day.compact { min-height:44px; }
-            .calendar-day-btn { font-size:0.85rem; }
+        .dep-calendar-layout .calendar-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+            margin-bottom: 16px;
+        }
+        .dep-calendar-layout .calendar-table-wrapper {
+            overflow-x: auto;
+            margin-bottom: 16px;
+        }
+        .dep-calendar-layout .calendar-table th,
+        .dep-calendar-layout .calendar-table td {
+            border: 1px solid #d7e2f1;
+            padding: 4px;
+            vertical-align: top;
+        }
+        .dep-calendar-layout .calendar-table th {
+            background: #1d4ed8;
+            color: #fff;
+            font-weight: 700;
+            padding: 10px 6px;
+            font-size: 0.82rem;
+            text-align: center;
+        }
+        .dep-calendar-layout .calendar-day {
+            min-height: 84px;
+            padding: 4px;
+        }
+        .dep-calendar-layout .calendar-day.current-month {
+            background: #f8fbff;
+        }
+        .dep-calendar-layout .calendar-day.other-month {
+            background: #f8fafc;
+            opacity: 0.55;
+        }
+        .dep-calendar-layout .calendar-day-btn {
+            width: 100%; min-height: 64px; border: 1px solid #d7e2f1; border-radius: 10px;
+            font-weight: 700; font-size: 0.9rem; color: #0f172a; display: flex;
+            flex-direction: column; align-items: center; justify-content: center;
+            box-sizing: border-box; text-decoration: none; cursor: default;
+            padding: 8px;
+            text-align: center;
+            white-space: normal;
+        }
+        .dep-calendar-layout .calendar-day-btn.has-event {
+            background: #e0ecff; color: #1d4ed8; box-shadow: inset 0 0 0 2px #1d4ed8;
+        }
+        .dep-calendar-layout .calendar-day-btn.past-event {
+            background: #eef2ff; color: #475569; box-shadow: inset 0 0 0 2px #94a3b8;
+        }
+        .dep-calendar-layout .calendar-day-btn.past-empty {
+            background: #f1f5f9; color: #94a3b8;
+        }
+        .dep-calendar-layout .calendar-day-btn.disabled {
+            background: #f8fafc; color: #94a3b8; opacity: 0.55;
+        }
+        .dep-calendar-layout .calendar-day-btn.open-slot {
+            background: transparent;
+            color: #065f46 !important;
+            border-color: #10b981;
+            box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.25);
+            cursor: pointer;
+            text-decoration: none;
+        }
+        .dep-calendar-layout .calendar-day-btn.open-slot:visited {
+            color: #065f46 !important;
+        }
+        .dep-calendar-layout .calendar-day-btn.open-slot:hover {
+            background: rgba(16, 185, 129, 0.08);
+        }
+        .dep-calendar-layout .calendar-day-btn.selected-open {
+            background: #10b981;
+            color: #fff;
+            box-shadow: inset 0 0 0 2px #047857;
+        }
+        .dep-calendar-layout .booking-modal-summary {
+            margin-bottom: 12px;
+            color: #475569;
+        }
+        .dep-calendar-layout .calendar-day-btn.open-slot .calendar-day-number {
+            text-decoration: underline;
+        }
+        .dep-calendar-layout .calendar-day-number {
+            display: block;
+            font-size: 1rem;
+        }
+        .dep-calendar-layout .calendar-day-meta {
+            display: block;
+            margin-top: 4px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            opacity: 0.85;
+        }
+        .dep-calendar-layout .calendar-day-btn.has-event .calendar-day-meta {
+            color: #1d4ed8;
+        }
+        .dep-calendar-layout .calendar-day-btn.past-event .calendar-day-meta {
+            color: #475569;
+        }
+        .dep-calendar-layout .calendar-day-btn.open-slot .calendar-day-meta {
+            background: #10b981;
+            color: #fff;
+            border-radius: 999px;
+            padding: 0 6px;
+            line-height: 1.4;
+            margin-top: 6px;
+        }
+        .dep-calendar-layout .calendar-day.compact.other-month .calendar-day-btn {
+            opacity: 0.55;
+            background: #f8fafc;
+        }
+        .dep-calendar-layout .calendar-legend {
+            font-size: 0.85rem; color: #475569; margin-bottom: 10px;
+        }
+        .dep-calendar-layout .calendar-legend span {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-right: 16px;
+        }
+        .dep-calendar-layout .calendar-legend .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .dep-calendar-layout .calendar-legend .legend-open { background: #10b981; }
+        .dep-calendar-layout .calendar-legend .legend-event { background: #1d4ed8; }
+        .dep-calendar-layout .calendar-legend .legend-past { background: #94a3b8; }
+        .dep-calendar-layout [data-testid="stForm"],
+        .dep-calendar-layout [data-testid="stForm"] > div {
+            background: transparent !important; border: none !important;
+            box-shadow: none !important; padding: 0 !important;
         }
         </style>
-    """,
+        """,
         unsafe_allow_html=True,
     )
-    st.markdown("".join(day_table), unsafe_allow_html=True)
 
-    if options:
-        picked = selected_date if selected_date in options else options[0]
-        st.markdown('<div id="calendar-details"></div>', unsafe_allow_html=True)
-        st.markdown("### Event Details")
-        events_for_day = events_by_day.get(picked, [])
-        if not events_for_day:
-            st.info("No events scheduled for this date.")
-        st.markdown(
-            f"<div class='calendar-details'><strong>{picked.strftime('%B %d, %Y')}</strong></div>",
-            unsafe_allow_html=True,
-        )
-        for event in events_for_day:
-            title = sanitize_title(event.get("Event Title", "Untitled"))
-            url = event.get("Event URL", "#")
-            typ = event.get("Type", "Past")
-            online = event.get("Online?", False)
-            dt = pd.to_datetime(event.get("Date and Time"), errors="coerce")
-            time_label = dt.strftime("%I:%M %p") if not pd.isna(dt) else "TBD"
-            date_label = (
-                dt.strftime("%b %d, %Y") if not pd.isna(dt) else picked.strftime("%b %d, %Y")
-            )
-            speaker = sanitize_title(event.get("Speakers", ""))
-            mode = "Online" if online else "In-person"
-            event_id = str(event.get("Event ID", "")).strip()
-            feedback_badge = ""
-            if event_id in feedback_by_event:
-                feedback_badge = f" ⭐ {feedback_by_event[event_id]:.1f}"
-            st.markdown(
-                f"- [{title}]({html.escape(url)}) [{typ}] — {date_label} {time_label} — {mode}"
-                f"{f' • {speaker}' if speaker else ''}{feedback_badge}"
-            )
+    st.markdown('<div class="dep-calendar-layout">', unsafe_allow_html=True)
+    st.markdown('<div class="calendar-legend">'
+                '<span><span class="legend-dot legend-open"></span>Open for booking</span>'
+                '<span><span class="legend-dot legend-event"></span>Event day</span>'
+                '<span><span class="legend-dot legend-past"></span>Past event</span>'
+                '</div>', unsafe_allow_html=True)
+    st.markdown('<div class="calendar-table-wrapper">' + calendar_html + '</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def format_event_link(title, url):
@@ -523,7 +885,10 @@ def format_feedback_link(event_id, title):
         return ""
     safe_title = sanitize_title(title)
     event_id = str(event_id).strip()
-    url = f"{FEEDBACK_FORM_URL}?event_id={quote_plus(event_id)}" f"&title={quote_plus(safe_title)}"
+    url = (
+        f"{FEEDBACK_FORM_URL}?event_id={quote_plus(event_id)}"
+        f"&title={quote_plus(safe_title)}"
+    )
     return f'<a href="{html.escape(url)}" target="_blank" rel="noopener noreferrer">Feedback</a>'
 
 
@@ -651,12 +1016,8 @@ def load_data(urlname):
                 "Speakers": format_speakers(e["node"].get("speakerDetails")),
             }
         )
-    df_up = (
-        pd.DataFrame(upcoming_rows)
-        if upcoming_rows
-        else pd.DataFrame(
-            columns=["Event ID", "Event Title", "Date and Time", "Event URL", "Online?", "Speakers"]
-        )
+    df_up = pd.DataFrame(upcoming_rows) if upcoming_rows else pd.DataFrame(
+        columns=["Event ID", "Event Title", "Date and Time", "Event URL", "Online?", "Speakers"]
     )
 
     # --- Past ---
@@ -840,10 +1201,172 @@ def get_dashboard_data(urlname):
         }
 
 
+def render_feedback_submission(feedback_df, df_up, df_past):
+    event_list = pd.concat([df_up, df_past], ignore_index=True)
+    event_list = event_list.dropna(subset=["Event ID", "Event Title"]).copy()
+    event_list["Event ID"] = event_list["Event ID"].astype(str).str.strip()
+    event_list["Event Title"] = event_list["Event Title"].apply(sanitize_title)
+    event_map = {
+        row["Event ID"]: row["Event Title"]
+        for _, row in event_list.drop_duplicates(subset=["Event ID"]).iterrows()
+    }
+
+    feedback_by_event = {}
+    if feedback_df is not None and not feedback_df.empty:
+        fb = feedback_df.copy()
+        fb["rating"] = pd.to_numeric(fb["rating"], errors="coerce")
+        fb = fb.dropna(subset=["rating"])
+        feedback_by_event = fb.groupby("event_id", observed=True)["rating"].mean().round(1).to_dict()
+
+    page = st.session_state.get("DEP_PAGE", "all")
+    with st.expander("Submit feedback for an event", expanded=page == "feedback"):
+        if feedback_by_event:
+            total_ratings = len(feedback_df)
+            avg_score = feedback_df["rating"].astype(float).mean()
+            st.markdown(
+                f"<div style='margin-bottom:8px;'>Existing feedback: {total_ratings} rating{'s' if total_ratings != 1 else ''} submitted, average score {avg_score:.1f}</div>",
+                unsafe_allow_html=True,
+            )
+        event_options = ["-- Select event --"] + [f"{eid} — {title}" for eid, title in event_map.items()]
+        star_options = [
+            "⭐☆☆☆☆ (1)",
+            "⭐⭐☆☆☆ (2)",
+            "⭐⭐⭐☆☆ (3)",
+            "⭐⭐⭐⭐☆ (4)",
+            "⭐⭐⭐⭐⭐ (5)",
+        ]
+        with st.form("feedback_form"):
+            selected_event = st.selectbox(
+                "Choose event to rate",
+                options=event_options,
+                index=0,
+                key="feedback_event_select",
+            )
+            selected_rating = st.selectbox(
+                "Rating",
+                options=star_options,
+                index=3,
+                key="feedback_star_rating",
+            )
+            rating = selected_rating.count("⭐")
+            comment = st.text_area("Comments (optional)")
+            submit_feedback = st.form_submit_button("Submit feedback")
+            if submit_feedback:
+                if selected_event == "-- Select event --":
+                    st.warning("Please select an event before submitting feedback.")
+                else:
+                    event_id = selected_event.split(" — ", 1)[0]
+                    if event_id in feedback_by_event:
+                        st.warning(
+                            "Feedback is already submitted for this event. "
+                            "Only one response per event is allowed."
+                        )
+                    else:
+                        save_feedback_data(
+                            FEEDBACK_DATA_PATH,
+                            {
+                                "event_id": event_id,
+                                "event_title": event_map.get(event_id, ""),
+                                "rating": int(rating),
+                                "comment": str(comment).strip(),
+                                "submitted_at": datetime.utcnow().isoformat() + "Z",
+                            },
+                        )
+                        st.success("Thank you! Your feedback has been recorded.")
+                        st.rerun()
+
+
+def render_community_calendar_section(feedback_df, df_up, df_past, narrow_viewport=False):
+    st.markdown('<div id="calendar"></div>', unsafe_allow_html=True)
+    st.subheader("DEP Community Calendar")
+
+    calendar_data = pd.concat(
+        [
+            df_up.assign(Type="Upcoming") if not df_up.empty else df_up,
+            df_past.assign(Type="Past") if not df_past.empty else df_past,
+        ],
+        ignore_index=True,
+    )
+    calendar_data["Date and Time"] = pd.to_datetime(calendar_data.get("Date and Time"), errors="coerce")
+    calendar_data = calendar_data.dropna(subset=["Date and Time"]).sort_values("Date and Time")
+
+    if calendar_data.empty:
+        st.info("No events available to render the calendar yet.")
+        return
+
+    now = pd.Timestamp.now()
+    selected_year, selected_month = st.columns(2)
+    year = selected_year.number_input(
+        "Year", min_value=2000, max_value=2100, value=int(now.year), step=1
+    )
+    month = selected_month.selectbox(
+        "Month",
+        list(range(1, 13)),
+        index=int(now.month) - 1,
+        format_func=lambda m: pd.Timestamp(year=int(year), month=m, day=1).strftime("%B"),
+    )
+    view_mode = st.radio(
+        "Calendar view",
+        options=["Month Grid", "List"],
+        index=0 if not narrow_viewport else 1,
+        horizontal=True,
+    )
+    st.caption(
+        "Hover event days for session details. "
+        "Click a green underlined date to request a speaker slot."
+    )
+    if view_mode == "List":
+        render_monthly_calendar(
+            calendar_data,
+            int(year),
+            int(month),
+            feedback_df=feedback_df,
+            view_mode="list",
+        )
+    else:
+        render_calendar_booking_grid(
+            calendar_data,
+            calendar_data,
+            int(year),
+            int(month),
+            feedback_df=feedback_df,
+            narrow_viewport=narrow_viewport,
+        )
+
+
+def render_booking_section(events_df):
+    st.subheader("Speaker Booking Requests")
+    st.caption(
+        "Select an available date from the calendar above. A popup booking form will appear; if your browser does not support popups, the form will render here."
+    )
+
+    modal_date_raw = st.session_state.get("cal_modal_date")
+    booking_saved = st.session_state.get("booking_request_saved", False)
+    if booking_saved and not modal_date_raw:
+        st.session_state.pop("booking_request_saved", None)
+        st.success("Booking request saved.")
+
+    if not modal_date_raw:
+        st.info("Tap the underlined date to request a speaker slot.")
+        return
+
+    try:
+        modal_date = pd.to_datetime(modal_date_raw).date()
+    except (TypeError, ValueError):
+        modal_date = None
+
+    if not modal_date:
+        st.warning("The selected booking date is invalid. Please choose another open date.")
+        return
+
+    st.markdown(f"### Booking request for {modal_date.strftime('%B %d, %Y')}")
+    _render_booking_modal(events_df, default_date=modal_date)
+
+
 # -------------------
 # Main App
 # -------------------
-file_path = "assets/dep_logo.png"
+file_path = os.path.join(ROOT_DIR, "assets", "dep_logo.png")
 try:
     with open(file_path, "rb") as f:
         data = f.read()
@@ -859,7 +1382,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.warning("Sidebar logo render failed: %s", e)
 
-
 def main():
     st.set_page_config(page_title="DEP Meetup Dashboard", layout="wide")
 
@@ -868,14 +1390,10 @@ def main():
         os.environ["DEP_PAGE"] = "all"
 
     PAGE_VIEW = (
-        (
-            st.session_state.get("DEP_PAGE")
-            if "DEP_PAGE" in st.session_state
-            else os.getenv("DEP_PAGE", "all")
-        )
-        .strip()
-        .lower()
-    )
+        st.session_state.get("DEP_PAGE")
+        if "DEP_PAGE" in st.session_state
+        else os.getenv("DEP_PAGE", "all")
+    ).strip().lower()
 
     dashboard = get_dashboard_data(URLNAME)
     df_up = dashboard["df_up"]
@@ -1152,6 +1670,7 @@ def main():
         unsafe_allow_html=True,
     )
 
+
     viewport_width = get_viewport_width()
     is_narrow = viewport_width is not None and viewport_width < 800
     if viewport_width is not None:
@@ -1207,9 +1726,7 @@ def main():
             fb = feedback_df.copy()
             fb["rating"] = pd.to_numeric(fb["rating"], errors="coerce")
             fb = fb.dropna(subset=["rating"])
-            feedback_by_event = (
-                fb.groupby("event_id", observed=True)["rating"].mean().round(1).to_dict()
-            )
+            feedback_by_event = fb.groupby("event_id", observed=True)["rating"].mean().round(1).to_dict()
             feedback_counts = fb.groupby("event_id", observed=True).size().to_dict()
 
         raw_all = pd.concat([df_up, df_past], ignore_index=True)
@@ -1218,14 +1735,10 @@ def main():
         available_years = sorted(raw_all["Date and Time"].dt.year.unique().tolist())
         past_year = None
         if not df_past.empty:
-            past_years = pd.to_datetime(
-                df_past.get("Date and Time"), errors="coerce"
-            ).dt.year.dropna()
+            past_years = pd.to_datetime(df_past.get("Date and Time"), errors="coerce").dt.year.dropna()
             if not past_years.empty:
                 past_year = int(past_years.max())
-        default_year = past_year or (
-            available_years[-1] if available_years else pd.Timestamp.now().year
-        )
+        default_year = past_year or (available_years[-1] if available_years else pd.Timestamp.now().year)
         year_index = available_years.index(default_year) if default_year in available_years else 0
         year_value = raw_year.selectbox("Filter year", options=available_years, index=year_index)
 
@@ -1262,14 +1775,13 @@ def main():
             if not df_up_filtered.empty:
                 df_up_display = df_up_filtered.copy()
                 date_fmt = "%a, %b %d, %Y" if compact_view else "%a, %b %d, %Y %I:%M %p"
-                df_up_display["Date and Time"] = pd.to_datetime(
-                    df_up_display["Date and Time"]
-                ).dt.strftime(date_fmt)
+                df_up_display["Date and Time"] = pd.to_datetime(df_up_display["Date and Time"]).dt.strftime(
+                    date_fmt
+                )
                 df_up_display["Event Title"] = df_up_display.apply(
                     lambda row: format_event_link(row["Event Title"], row["Event URL"]),
                     axis=1,
                 )
-
                 def _event_feedback_cell(row):
                     event_id = str(row.get("Event ID", "")).strip()
                     link = format_feedback_link(event_id, row.get("Event Title", ""))
@@ -1284,12 +1796,8 @@ def main():
                 if compact_view:
                     df_up_display = df_up_display[["Event Title", "Date and Time", "Feedback"]]
                 else:
-                    df_up_display = df_up_display.drop(
-                        columns=["Event URL", "Event ID"], errors="ignore"
-                    )
-                render_responsive_table(
-                    df_up_display, allow_html_columns=["Event Title", "Feedback"]
-                )
+                    df_up_display = df_up_display.drop(columns=["Event URL", "Event ID"], errors="ignore")
+                render_responsive_table(df_up_display, allow_html_columns=["Event Title", "Feedback"])
             else:
                 st.info("No upcoming events found.")
 
@@ -1302,14 +1810,11 @@ def main():
                     "Date and Time", ascending=False
                 ).reset_index(drop=True)
                 date_fmt = "%a, %b %d, %Y" if compact_view else "%a, %b %d, %Y %I:%M %p"
-                df_past_display["Date and Time"] = df_past_display["Date and Time"].dt.strftime(
-                    date_fmt
-                )
+                df_past_display["Date and Time"] = df_past_display["Date and Time"].dt.strftime(date_fmt)
                 df_past_display["Event Title"] = df_past_display.apply(
                     lambda row: format_event_link(row["Event Title"], row["Event URL"]),
                     axis=1,
                 )
-
                 def _event_feedback_cell(row):
                     event_id = str(row.get("Event ID", "")).strip()
                     link = format_feedback_link(event_id, row.get("Event Title", ""))
@@ -1329,76 +1834,11 @@ def main():
                     df_past_display = df_past_display.drop(
                         columns=["Event URL", "Event ID"], errors="ignore"
                     )
-                render_responsive_table(
-                    df_past_display, allow_html_columns=["Event Title", "Feedback"]
-                )
+                render_responsive_table(df_past_display, allow_html_columns=["Event Title", "Feedback"])
             else:
                 st.info("No past events found.")
 
-        with st.expander("Submit feedback for an event"):
-            event_list = pd.concat([df_up, df_past], ignore_index=True)
-            event_list = event_list.dropna(subset=["Event ID", "Event Title"]).copy()
-            event_list["Event ID"] = event_list["Event ID"].astype(str).str.strip()
-            event_list["Event Title"] = event_list["Event Title"].apply(sanitize_title)
-            event_map = {
-                row["Event ID"]: row["Event Title"]
-                for _, row in event_list.drop_duplicates(subset=["Event ID"]).iterrows()
-            }
-            if feedback_by_event:
-                total_ratings = len(feedback_df)
-                avg_score = feedback_df["rating"].astype(float).mean()
-                st.markdown(
-                    f"<div style='margin-bottom:8px;'>Existing feedback: {total_ratings} rating{'s' if total_ratings != 1 else ''} submitted, average score {avg_score:.1f}</div>",
-                    unsafe_allow_html=True,
-                )
-            event_options = ["-- Select event --"] + [
-                f"{eid} — {title}" for eid, title in event_map.items()
-            ]
-            star_options = [
-                "⭐☆☆☆☆ (1)",
-                "⭐⭐☆☆☆ (2)",
-                "⭐⭐⭐☆☆ (3)",
-                "⭐⭐⭐⭐☆ (4)",
-                "⭐⭐⭐⭐⭐ (5)",
-            ]
-            with st.form("feedback_form"):
-                selected_event = st.selectbox(
-                    "Choose event to rate",
-                    options=event_options,
-                    index=0,
-                    key="feedback_event_select",
-                )
-                selected_rating = st.selectbox(
-                    "Rating",
-                    options=star_options,
-                    index=3,
-                    key="feedback_star_rating",
-                )
-                rating = selected_rating.count("⭐")
-                comment = st.text_area("Comments (optional)")
-                submit_feedback = st.form_submit_button("Submit feedback")
-                if submit_feedback:
-                    if selected_event == "-- Select event --":
-                        st.warning("Please select an event before submitting feedback.")
-                    else:
-                        event_id = selected_event.split(" — ", 1)[0]
-                        if event_id in feedback_by_event:
-                            st.warning(
-                                "Feedback is already submitted for this event. "
-                                "Only one response per event is allowed."
-                            )
-                        else:
-                            save_feedback_data(
-                                FEEDBACK_DATA_PATH,
-                                {
-                                    "event_id": event_id,
-                                    "event_title": event_map.get(event_id, ""),
-                                    "rating": int(rating),
-                                    "comment": str(comment).strip(),
-                                    "submitted_at": datetime.utcnow().isoformat() + "Z",
-                                },
-                            )
-                            st.success("Thank you! Your feedback has been recorded.")
+        render_feedback_submission(feedback_df, df_up, df_past)
 
     def render_feedback_page(feedback_df=None):
         st.markdown('<div id="feedback"></div>', unsafe_allow_html=True)
@@ -1425,10 +1865,9 @@ def main():
         )
 
         display_df = fb["event_id event_title rating comment submitted_at".split()].copy()
-        display_df["submitted_at"] = (
-            display_df["submitted_at"].dt.strftime("%Y-%m-%d %H:%M UTC").fillna("")
-        )
+        display_df["submitted_at"] = display_df["submitted_at"].dt.strftime("%Y-%m-%d %H:%M UTC").fillna("")
         render_responsive_table(display_df)
+
 
     # --- Insights / Story ---
     if PAGE_VIEW in ("all", "insights"):
@@ -1457,6 +1896,14 @@ def main():
 
     if PAGE_VIEW == "feedback":
         render_feedback_page(feedback_df=feedback_df)
+        render_feedback_submission(feedback_df, df_up, df_past)
+
+    if PAGE_VIEW == "calendar":
+        calendar_events = pd.concat([df_up, df_past], ignore_index=True)
+        render_community_calendar_section(
+            feedback_df, df_up, df_past, narrow_viewport=is_narrow
+        )
+        render_booking_section(calendar_events)
 
     if PAGE_VIEW == "all":
         with st.expander("How Community Pulse Score works"):
@@ -1477,7 +1924,7 @@ def main():
     **Important note**
     - This score supports decisions, but it should be read with the detailed KPIs and charts below.
     """)
-
+            
         st.subheader("Community Insights")
 
         if df_past.empty and df_up.empty:
@@ -1508,7 +1955,9 @@ def main():
                     next_event["Date and Time"], errors="coerce"
                 )
                 next_event = (
-                    next_event.dropna(subset=["Date and Time"]).sort_values("Date and Time").head(1)
+                    next_event.dropna(subset=["Date and Time"])
+                    .sort_values("Date and Time")
+                    .head(1)
                 )
                 next_event = next_event.iloc[0] if not next_event.empty else df_up.iloc[0]
                 next_dt = pd.to_datetime(next_event.get("Date and Time"), errors="coerce")
@@ -1530,6 +1979,7 @@ def main():
                     f"Next event: **[{next_event['Event Title']}]({next_event['Event URL']})** "
                     f"on **{next_dt_str}** | **{mode_text}**{speaker_text}"
                 )
+
 
     # --- Metrics ---
     if PAGE_VIEW in ("all", "kpi"):
@@ -1587,9 +2037,7 @@ def main():
                 "Nov",
                 "Dec",
             ]
-            monthly["Month"] = pd.Categorical(
-                monthly["Month"], categories=month_order, ordered=True
-            )
+            monthly["Month"] = pd.Categorical(monthly["Month"], categories=month_order, ordered=True)
             monthly_rollup = (
                 monthly.groupby(["Year", "Month"], observed=True)["No. of Attendees"]
                 .mean()
@@ -1597,9 +2045,7 @@ def main():
             )
             monthly_rollup = monthly_rollup.sort_values(["Year", "Month"])
 
-            heatmap_data = monthly_rollup.pivot(
-                index="Year", columns="Month", values="Avg Attendance"
-            )
+            heatmap_data = monthly_rollup.pivot(index="Year", columns="Month", values="Avg Attendance")
             heatmap_data = heatmap_data.reindex(columns=month_order)
             heatmap_data.index = pd.to_numeric(heatmap_data.index, errors="coerce")
             heatmap_data = heatmap_data.sort_index(ascending=False)
@@ -1648,6 +2094,8 @@ def main():
                         """,
                         unsafe_allow_html=True,
                     )
+            if PAGE_VIEW == "speakers":
+                render_responsive_table(speaker_board)
 
     if PAGE_VIEW == "all":
         render_meetup_events_section()
@@ -1656,7 +2104,6 @@ def main():
         '<div class="footer-text">Copyright © 2026 Katherine Bulac for Data Engineering Pilipinas Community.</div>',
         unsafe_allow_html=True,
     )
-
 
 if __name__ == "__main__":
     main()

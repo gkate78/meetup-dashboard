@@ -21,6 +21,9 @@ This update adds a community-focused calendar and feedback experience to the DEP
 - **Responsive view switch**:
   - Month Grid (desktop)
   - List view (mobile-friendly)
+- **Booking request support**:
+  - Popup booking form for speaker slots on available calendar dates
+  - Form entries are preserved on invalid submission, and email input is validated before save
 - **Success snapshot** from the persisted feedback store: top events by average rating.
 
 ## ⚙️ Configuration
