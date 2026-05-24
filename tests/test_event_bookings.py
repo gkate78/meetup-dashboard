@@ -11,6 +11,7 @@ from meetup import (
     format_event_conflict_message,
     load_event_bookings,
     load_feedback_data,
+    load_speaker_overrides,
     save_event_booking,
     save_feedback_data,
     update_event_booking_status,
@@ -87,6 +88,24 @@ def test_feedback_storage_roundtrip_sqlite(tmp_path):
     assert feedback.iloc[0]["event_title"] == "DEP Meetup"
     assert feedback.iloc[0]["comment"] == "Great session"
     assert feedback.iloc[0]["submitted_at"] == "2026-05-21T00:00:00Z"
+
+
+def test_load_speaker_overrides_sqlite(tmp_path):
+    path = tmp_path / "speaker_overrides.db"
+    import sqlite3
+    import pandas as pd
+
+    records = [
+        {"event_id": "evt-1", "canonical_speakers": "Jane Doe"},
+        {"event_id": "evt-2", "canonical_speakers": "John Smith"},
+    ]
+    df = pd.DataFrame(records)
+    with sqlite3.connect(str(path)) as conn:
+        df.to_sql("speaker_overrides", conn, if_exists="replace", index=False)
+
+    overrides = load_speaker_overrides(str(path))
+    assert overrides["evt-1"] == "Jane Doe"
+    assert overrides["evt-2"] == "John Smith"
 
 
 def test_load_event_bookings_recovers_mixed_schema(tmp_path):

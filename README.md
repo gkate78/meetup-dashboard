@@ -87,7 +87,7 @@ Feedback settings:
 - `FEEDBACK_DATA_PATH` (default `data/feedback.db`; legacy `data/feedback.csv` is also supported)
 
 Speaker overrides for missing past speakers:
-- `SPEAKER_OVERRIDES_PATH` (default `data/speaker_overrides.csv`)
+- `SPEAKER_OVERRIDES_PATH` (default `data/speaker_overrides.db`; legacy `data/speaker_overrides.csv` is also supported)
 - Required columns: `event_id`, `canonical_speakers`
 - Optional columns: `source`, `notes`
 - Rule: Meetup speaker names are kept; overrides are used only when past event speakers are missing.
@@ -115,9 +115,9 @@ Speaker booking requests:
 ### Dokploy
 Use mounted storage for the runtime files and point the app at those paths:
 
-- `FEEDBACK_DATA_PATH` -> mounted `feedback.csv`
-- `SPEAKER_OVERRIDES_PATH` -> mounted `speaker_overrides.csv`
-- `EVENT_BOOKINGS_PATH` -> mounted `event_bookings.csv`
+- `FEEDBACK_DATA_PATH` -> mounted `feedback.db` (SQLite) or `feedback.csv`
+- `SPEAKER_OVERRIDES_PATH` -> mounted `speaker_overrides.db` (SQLite) or `speaker_overrides.csv`
+- `EVENT_BOOKINGS_PATH` -> mounted `event_bookings.db` (SQLite) or `event_bookings.csv`
 - `SNAPSHOT_PATH` -> mounted cache path if you want file-based snapshots
 
 Keep `FEEDBACK_FORM_URL` empty if you want only the in-app feedback page. If you reuse this pattern in another project, the deploy only needs the same environment variables and writable data paths.

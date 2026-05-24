@@ -93,7 +93,7 @@ def get_viewport_width():
 
 API_URL = "https://api.meetup.com/gql-ext"
 URLNAME = "data-engineering-pilipinas"
-SPEAKER_OVERRIDES_PATH = _resolve_data_path(os.getenv("SPEAKER_OVERRIDES_PATH", "data/speaker_overrides.csv"))
+SPEAKER_OVERRIDES_PATH = _resolve_data_path(os.getenv("SPEAKER_OVERRIDES_PATH", "data/speaker_overrides.db"))
 SNAPSHOT_PATH = _resolve_data_path(os.getenv("SNAPSHOT_PATH", "cache/meetup_snapshot.json"))
 SNAPSHOT_BACKEND = os.getenv("SNAPSHOT_BACKEND", "file").strip().lower()
 SNAPSHOT_S3_BUCKET = os.getenv("SNAPSHOT_S3_BUCKET", "").strip()
@@ -341,7 +341,55 @@ def normalize_speaker_column(df):
     return df
 
 
+def _ensure_speaker_overrides_sqlite_schema(path: str) -> None:
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    import sqlite3
+
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS speaker_overrides (
+                event_id TEXT,
+                canonical_speakers TEXT
+            )
+            """
+        )
+        conn.commit()
+
+
+def _load_speaker_overrides_from_sqlite(path: str):
+    import sqlite3
+
+    if not os.path.exists(path):
+        return {}
+    _ensure_speaker_overrides_sqlite_schema(path)
+    try:
+        with sqlite3.connect(path) as conn:
+            raw = pd.read_sql_query("SELECT * FROM speaker_overrides", conn)
+    except Exception as e:
+        logger.warning("Unable to read speaker overrides from SQLite %s: %s", path, e)
+        return {}
+
+    required = {"event_id", "canonical_speakers"}
+    if not required.issubset(set(raw.columns)):
+        logger.warning("Speaker overrides file missing required columns: %s", sorted(required))
+        return {}
+
+    clean = raw.copy()
+    clean["event_id"] = clean["event_id"].astype(str).str.strip()
+    clean["canonical_speakers"] = clean["canonical_speakers"].apply(normalize_speaker_text)
+    clean = clean[(clean["event_id"] != "") & (clean["canonical_speakers"] != "")]
+    if clean.empty:
+        return {}
+    return dict(zip(clean["event_id"], clean["canonical_speakers"], strict=False))
+
+
 def load_speaker_overrides(path):
+    if _is_sqlite_path(path):
+        return _load_speaker_overrides_from_sqlite(path)
+
     if not os.path.exists(path):
         return {}
     try:
