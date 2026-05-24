@@ -3,11 +3,23 @@
 from __future__ import annotations
 
 import csv
+import logging
 import os
+import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+SQLITE_BOOKING_EXTENSIONS = (".db", ".sqlite", ".sqlite3")
+TABLE_NAME = "event_bookings"
 
 BOOKING_COLUMNS = [
     "requested_datetime",
@@ -43,6 +55,34 @@ def _format_utc_storage(value: Any) -> str:
     if pd.isna(ts):
         return ""
     return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _is_sqlite_path(path: str) -> bool:
+    return os.path.splitext(str(path).lower())[1] in SQLITE_BOOKING_EXTENSIONS
+
+
+def _ensure_sqlite_schema(path: str) -> None:
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
+                requested_datetime TEXT,
+                duration_minutes INTEGER,
+                speaker_name TEXT,
+                email TEXT,
+                talk_title TEXT,
+                talk_summary TEXT,
+                preferred_format TEXT,
+                availability_notes TEXT,
+                status TEXT,
+                submitted_at TEXT
+            )
+            """
+        )
+        conn.commit()
 
 
 def _normalize_booking_frame(bookings: pd.DataFrame) -> pd.DataFrame:
@@ -124,6 +164,19 @@ def _parse_booking_row(fields: list[str]) -> dict[str, Any]:
     }
 
 
+def _load_bookings_from_sqlite(path: str) -> pd.DataFrame:
+    try:
+        if not os.path.exists(path):
+            return pd.DataFrame(columns=BOOKING_COLUMNS)
+        _ensure_sqlite_schema(path)
+        with sqlite3.connect(path) as conn:
+            df = pd.read_sql_query(f"SELECT * FROM {TABLE_NAME}", conn)
+        return df if df is not None else pd.DataFrame(columns=BOOKING_COLUMNS)
+    except Exception as exc:
+        logger.warning("Unable to load event bookings from SQLite %s: %s", path, exc)
+        return pd.DataFrame(columns=BOOKING_COLUMNS)
+
+
 def _load_bookings_from_csv(path: str) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     with open(path, encoding="utf-8", newline="") as handle:
@@ -150,6 +203,9 @@ def _load_bookings_from_csv(path: str) -> pd.DataFrame:
 
 
 def load_event_bookings(path: str) -> pd.DataFrame:
+    if _is_sqlite_path(path):
+        return _normalize_booking_frame(_load_bookings_from_sqlite(path))
+
     if not os.path.exists(path):
         return pd.DataFrame(columns=BOOKING_COLUMNS)
 
@@ -176,10 +232,16 @@ def load_event_bookings(path: str) -> pd.DataFrame:
 
 
 def save_event_bookings(path: str, bookings: pd.DataFrame) -> None:
+    normalized = _normalize_booking_frame(bookings)
+    if _is_sqlite_path(path):
+        _ensure_sqlite_schema(path)
+        with sqlite3.connect(path) as conn:
+            normalized.to_sql(TABLE_NAME, conn, if_exists="replace", index=False)
+        return
+
     directory = os.path.dirname(path)
     if directory:
         os.makedirs(directory, exist_ok=True)
-    normalized = _normalize_booking_frame(bookings)
     normalized.to_csv(path, index=False)
 
 

@@ -41,6 +41,31 @@ def test_event_booking_roundtrip(tmp_path):
     assert bookings.iloc[0]["talk_title"] == "Building Reliable Pipelines"
 
 
+def test_event_booking_roundtrip_sqlite(tmp_path):
+    path = tmp_path / "event_bookings.db"
+    record = {
+        "requested_datetime": "2026-05-21T12:00:00Z",
+        "duration_minutes": 60,
+        "speaker_name": "Ana Cruz",
+        "email": "ana@example.com",
+        "talk_title": "Building Reliable Pipelines",
+        "talk_summary": "A practical talk on data pipeline reliability.",
+        "preferred_format": "Hybrid",
+        "availability_notes": "Evenings, UTC+8",
+        "status": "Requested",
+        "submitted_at": "2026-05-21T00:00:00Z",
+    }
+
+    save_event_booking(str(path), record)
+    bookings = load_event_bookings(str(path))
+
+    assert len(bookings) == 1
+    assert str(bookings.iloc[0]["requested_datetime"])[:10] == "2026-05-21"
+    assert int(bookings.iloc[0]["duration_minutes"]) == 60
+    assert bookings.iloc[0]["speaker_name"] == "Ana Cruz"
+    assert bookings.iloc[0]["talk_title"] == "Building Reliable Pipelines"
+
+
 def test_load_event_bookings_recovers_mixed_schema(tmp_path):
     path = tmp_path / "event_bookings.csv"
     path.write_text(

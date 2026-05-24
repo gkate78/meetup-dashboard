@@ -94,11 +94,11 @@ Speaker overrides for missing past speakers:
 - Missing speaker names are rendered as blank in event tables/UI.
 
 Speaker booking requests:
-- `EVENT_BOOKINGS_PATH` (default `data/event_bookings.csv`)
+- `EVENT_BOOKINGS_PATH` (default `data/event_bookings.db` for SQLite storage; legacy CSV paths are also supported)
 - Required columns: `requested_datetime`, `speaker_name`, `email`, `talk_title`, `submitted_at`
 - Optional columns: `duration_minutes`, `talk_summary`, `preferred_format`, `availability_notes`, `status`
 - Status values currently used in the app: `Requested`, `Tentative`, `Confirmed`, `Cancelled`
-- The Booking Calendar page appends each new request to the CSV and keeps it in persistent storage.
+- The Booking Calendar page appends each new request to the storage file and keeps it in persistent storage.
 - Future bookings are checked against existing requests and against a default DEP event window to reduce double booking.
 - The booking modal preserves entered values when a submission fails validation or conflicts, so users do not lose their input.
 - Email addresses are validated before a request is saved.
