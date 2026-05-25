@@ -8,7 +8,7 @@ which will save a snapshot via the configured `SNAPSHOT_BACKEND`.
 
 import logging
 
-from meetup import URLNAME, get_dashboard_data
+from .app import URLNAME, get_dashboard_data
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("fetch_snapshot")

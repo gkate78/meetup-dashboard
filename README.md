@@ -116,6 +116,9 @@ Feedback settings:
 - `FEEDBACK_FORM_URL` (default empty)
 - `FEEDBACK_DATA_PATH` (default `data/feedback.db`; legacy `data/feedback.csv` is also supported)
 
+Moderator access:
+- `ADMIN_PASSWORD` (optional) enables the admin dashboard page for booking management
+
 Speaker overrides for missing past speakers:
 - `SPEAKER_OVERRIDES_PATH` (default `data/speaker_overrides.db`; legacy `data/speaker_overrides.csv` is also supported)
 - Required columns: `event_id`, `canonical_speakers`
@@ -128,6 +131,7 @@ Speaker booking requests:
 - Required columns: `requested_datetime`, `speaker_name`, `email`, `talk_title`, `submitted_at`
 - Optional columns: `duration_minutes`, `talk_summary`, `preferred_format`, `availability_notes`, `status`
 - Status values currently used in the app: `Requested`, `Tentative`, `Confirmed`, `Cancelled`
+- `ADMIN_PASSWORD` enables a moderator booking management page that lets organizers review and update request status.
 - The Booking Calendar page appends each new request to the storage file and keeps it in persistent storage.
 - Future bookings are checked against existing requests and against a default DEP event window to reduce double booking.
 - The booking modal preserves entered values when a submission fails validation or conflicts, so users do not lose their input.

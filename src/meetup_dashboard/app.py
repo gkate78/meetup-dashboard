@@ -10,7 +10,7 @@ from datetime import date, datetime, time, timezone
 from typing import Any
 from urllib.parse import quote_plus, urlparse
 
-ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 def _resolve_data_path(path: str) -> str:
     value = str(path or "").strip()
@@ -19,6 +19,37 @@ def _resolve_data_path(path: str) -> str:
     value = os.path.expanduser(value)
     return value if os.path.isabs(value) else os.path.abspath(os.path.join(ROOT_DIR, value))
 
+
+def _load_local_dotenv() -> None:
+    dotenv_path = os.path.join(ROOT_DIR, ".env")
+    if not os.path.exists(dotenv_path):
+        return
+
+    try:
+        with open(dotenv_path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                raw = line.strip()
+                if not raw or raw.startswith("#"):
+                    continue
+                if "=" not in raw:
+                    continue
+                key, value = raw.split("=", 1)
+                key = key.strip()
+                value = value.strip()
+                if not key:
+                    continue
+                if (value.startswith('"') and value.endswith('"')) or (
+                    value.startswith("'") and value.endswith("'")
+                ):
+                    value = value[1:-1]
+                if key not in os.environ:
+                    os.environ[key] = value
+    except OSError:
+        pass
+
+
+_load_local_dotenv()
+
 import pandas as pd
 import plotly.express as px
 import requests
@@ -26,7 +57,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from streamlit.errors import StreamlitSecretNotFoundError
 
-from event_bookings import (
+from .bookings import (
     DEFAULT_EVENT_DURATION_MINUTES,
     DEP_EVENT_TZ,
     booking_conflict_mask,
@@ -39,8 +70,9 @@ from event_bookings import (
     save_event_bookings,
     slot_conflict_mask,
     update_event_booking_status,
+    _display_timestamp,
 )
-from meetup_metrics import build_speaker_leaderboard, compute_pulse, safe_metric
+from .metrics import build_speaker_leaderboard, compute_pulse, safe_metric
 
 
 def sanitize_title(title):
@@ -88,6 +120,45 @@ def get_viewport_width():
     return vw
 
 
+def safe_rerun() -> None:
+    if hasattr(st, "rerun"):
+        st.rerun()
+    elif hasattr(st, "experimental_rerun"):
+        st.experimental_rerun()
+    else:
+        raise RuntimeError("Streamlit rerun is unavailable")
+
+
+def is_moderator_authenticated() -> bool:
+    return bool(st.session_state.get("is_moderator", False))
+
+
+def render_moderator_sidebar():
+    with st.sidebar.expander("Moderator access", expanded=True):
+        if ADMIN_PASSWORD:
+            if st.session_state.get("is_moderator", False):
+                st.success("Moderator signed in")
+                if st.button("Sign out", key="admin_sign_out"):
+                    st.session_state.pop("is_moderator", None)
+                    st.session_state.pop("admin_password_input", None)
+                    safe_rerun()
+            else:
+                password = st.text_input(
+                    "Moderator password",
+                    type="password",
+                    key="admin_password_input",
+                )
+                if st.button("Sign in", key="admin_sign_in"):
+                    if password.strip() == ADMIN_PASSWORD:
+                        st.session_state["is_moderator"] = True
+                        st.session_state.pop("admin_password_input", None)
+                        safe_rerun()
+                    else:
+                        st.error("Invalid moderator password")
+        else:
+            st.info("ADMIN_PASSWORD not configured. Admin console is disabled.")
+
+
 # -------------------
 # Config
 # -------------------
@@ -125,11 +196,18 @@ MEETUP_TOKEN = os.getenv("MEETUP_TOKEN", "").strip()
 FEEDBACK_FORM_URL = os.getenv("FEEDBACK_FORM_URL", "").strip()
 FEEDBACK_DATA_PATH = _resolve_data_path(os.getenv("FEEDBACK_DATA_PATH", "data/feedback.db"))
 EVENT_BOOKINGS_PATH = _resolve_data_path(os.getenv("EVENT_BOOKINGS_PATH", "data/event_bookings.db"))
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
 if not MEETUP_TOKEN:
     try:
         MEETUP_TOKEN = st.secrets["MEETUP_TOKEN"].strip()
     except (StreamlitSecretNotFoundError, KeyError):
         MEETUP_TOKEN = ""
+
+if not ADMIN_PASSWORD:
+    try:
+        ADMIN_PASSWORD = st.secrets["ADMIN_PASSWORD"].strip()
+    except (StreamlitSecretNotFoundError, KeyError):
+        ADMIN_PASSWORD = ""
 
 # -------------------
 # GraphQL Queries
@@ -1528,6 +1606,81 @@ def render_booking_section(events_df):
     _render_booking_modal(events_df, default_date=modal_date)
 
 
+def render_admin_booking_page(bookings_df):
+    st.subheader("Moderator dashboard")
+    st.markdown(
+        "Use this page to review speaker booking requests and update request status. "
+        "Changes are saved back to the booking storage file."
+    )
+
+    if bookings_df is None or bookings_df.empty:
+        st.info("No booking requests have been submitted yet.")
+        return
+
+    all_bookings = bookings_df.copy()
+    status_filter = st.selectbox(
+        "Filter by status",
+        options=["All", "Requested", "Approved", "Confirmed", "Cancelled", "Tentative"],
+        index=0,
+    )
+
+    visible_bookings = all_bookings
+    if status_filter != "All":
+        visible_bookings = all_bookings[
+            all_bookings["status"].astype(str).str.strip().str.casefold()
+            == status_filter.casefold()
+        ].copy()
+
+    if visible_bookings.empty:
+        st.info("No booking requests match the selected filter.")
+        return
+
+    with st.form("admin_booking_form"):
+        changed = False
+        st.markdown(f"**{len(visible_bookings)} booking request(s)** currently visible.")
+
+        for index, booking in visible_bookings.iterrows():
+            requested_dt = booking.get("requested_datetime", "")
+            duration = int(booking.get("duration_minutes") or DEFAULT_EVENT_DURATION_MINUTES)
+            speaker_name = str(booking.get("speaker_name", "")).strip() or "Unknown speaker"
+            talk_title = str(booking.get("talk_title", "")).strip() or "Untitled talk"
+            submitted_at = booking.get("submitted_at", "")
+            current_status = str(booking.get("status", "Requested")).strip() or "Requested"
+            expander_label = f"{speaker_name} — {talk_title} [{current_status}]"
+            with st.expander(expander_label, expanded=False):
+                st.write(
+                    f"**Requested:** {_display_timestamp(requested_dt, duration)}  \n"
+                    f"**Email:** {booking.get('email', '')}  \n"
+                    f"**Duration:** {duration} minutes  \n"
+                    f"**Format:** {booking.get('preferred_format', '')}  \n"
+                    f"**Submitted:** {submitted_at}  \n"
+                    f"**Notes:** {booking.get('availability_notes', '') or 'None'}  \n"
+                    f"**Talk summary:** {booking.get('talk_summary', '') or 'None'}"
+                )
+                status_key = f"admin_status_{index}"
+                selected_status = st.selectbox(
+                    "Status",
+                    options=["Requested", "Approved", "Confirmed", "Cancelled", "Tentative"],
+                    index=["Requested", "Approved", "Confirmed", "Cancelled", "Tentative"].index(current_status)
+                    if current_status in ["Requested", "Approved", "Confirmed", "Cancelled", "Tentative"]
+                    else 0,
+                    key=status_key,
+                )
+                if selected_status != current_status:
+                    all_bookings.loc[index, "status"] = selected_status
+                    changed = True
+
+        submit = st.form_submit_button("Save booking updates")
+
+    if submit:
+        if changed:
+            save_event_bookings(EVENT_BOOKINGS_PATH, all_bookings)
+            st.success("Booking request status updates saved.")
+            safe_rerun()
+        else:
+            st.info("No status changes were made.")
+
+
 # -------------------
 # Main App
 # -------------------
@@ -1559,6 +1712,8 @@ def main():
         if "DEP_PAGE" in st.session_state
         else os.getenv("DEP_PAGE", "all")
     ).strip().lower()
+
+    render_moderator_sidebar()
 
     dashboard = get_dashboard_data(URLNAME)
     df_up = dashboard["df_up"]
@@ -2069,6 +2224,16 @@ def main():
             feedback_df, df_up, df_past, narrow_viewport=is_narrow
         )
         render_booking_section(calendar_events)
+
+    if PAGE_VIEW == "admin":
+        if not is_moderator_authenticated():
+            st.warning(
+                "Moderator access is required to view this page. "
+                "Use the sidebar to sign in with the configured moderator password."
+            )
+        else:
+            bookings_df = load_event_bookings(EVENT_BOOKINGS_PATH)
+            render_admin_booking_page(bookings_df)
 
     if PAGE_VIEW == "all":
         with st.expander("How Community Pulse Score works"):
