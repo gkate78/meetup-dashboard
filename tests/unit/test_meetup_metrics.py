@@ -1,6 +1,12 @@
 import pandas as pd
 
-from meetup_dashboard.metrics import build_sparkline, build_speaker_leaderboard, compute_pulse, safe_metric
+from meetup_dashboard.metrics import (
+    build_sparkline,
+    build_speaker_leaderboard,
+    compute_pulse,
+    safe_metric,
+    split_speaker_names,
+)
 
 
 def test_safe_metric_mean_handles_nan():
@@ -77,6 +83,51 @@ def test_build_speaker_leaderboard_excludes_missing_and_nan_speakers():
     )
     board = build_speaker_leaderboard(df)
     assert board["Speaker"].tolist() == ["Ana"]
+
+
+def test_split_speaker_names_handles_joiners_and_credentials():
+    assert split_speaker_names("Jessie Dimanlig and Jake Robert Mongaya") == [
+        "Jessie Dimanlig",
+        "Jake Robert Mongaya",
+    ]
+    assert split_speaker_names("Nina Comia & Ian James Maceres") == [
+        "Nina Comia",
+        "Ian James Maceres",
+    ]
+    assert split_speaker_names("Engr. Bob Mathew D. Sunga, MSDS") == [
+        "Engr. Bob Mathew D. Sunga, MSDS"
+    ]
+
+
+def test_build_speaker_leaderboard_splits_joiners_without_counting_credentials():
+    df = pd.DataFrame(
+        [
+            {
+                "Event Title": "A",
+                "Date and Time": "2025-01-01",
+                "No. of Attendees": 60,
+                "Speakers": "Jessie Dimanlig and Jake Robert Mongaya",
+            },
+            {
+                "Event Title": "B",
+                "Date and Time": "2025-02-01",
+                "No. of Attendees": 40,
+                "Speakers": "Engr. Bob Mathew D. Sunga, MSDS",
+            },
+            {
+                "Event Title": "C",
+                "Date and Time": "2025-03-01",
+                "No. of Attendees": 80,
+                "Speakers": "jessie dimanlig",
+            },
+        ]
+    )
+
+    board = build_speaker_leaderboard(df)
+
+    assert "MSDS" not in board["Speaker"].tolist()
+    assert "Jake Robert Mongaya" in board["Speaker"].tolist()
+    assert board.loc[board["Speaker"] == "Jessie Dimanlig", "Sessions"].iloc[0] == 2
 
 
 def test_compute_pulse_structure_and_bounds():

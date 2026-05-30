@@ -72,7 +72,7 @@ from .bookings import (
     update_event_booking_status,
     _display_timestamp,
 )
-from .metrics import build_speaker_leaderboard, compute_pulse, safe_metric
+from .metrics import build_speaker_leaderboard, compute_pulse, safe_metric, split_speaker_names
 
 
 def sanitize_title(title):
@@ -441,24 +441,7 @@ def format_speakers(speakers):
 
 
 def normalize_speaker_text(value):
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return ""
-    text = str(value)
-    if text.strip().casefold() in {"", "-", "nan", "none", "null", "na", "n/a"}:
-        return ""
-    text = text.replace("<br/>", ",").replace("<br>", ",")
-    text = re.sub(r"<[^>]+>", " ", text)
-    parts = re.split(r"[,;\n]+", text)
-    names = []
-    seen = set()
-    for part in parts:
-        part = re.sub(r"^\s*[-*]+\s*", "", part)
-        part = re.sub(r"[^A-Za-z0-9Ññ .,'-]", "", part)
-        part = re.sub(r"\s+", " ", part).strip(" -_,.")
-        key = part.casefold()
-        if part and key not in seen and key not in {"nan", "none", "null", "na", "n/a"}:
-            seen.add(key)
-            names.append(part)
+    names = split_speaker_names(value)
     return ", ".join(names) if names else ""
 
 

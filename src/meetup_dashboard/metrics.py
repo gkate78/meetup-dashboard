@@ -1,4 +1,67 @@
+import re
+
 import pandas as pd
+
+INVALID_SPEAKERS = {"", "-", "nan", "none", "null", "na", "n/a"}
+SPEAKER_CREDENTIALS = {
+    "cpa",
+    "cfa",
+    "dba",
+    "jd",
+    "mba",
+    "md",
+    "ms",
+    "msds",
+    "msc",
+    "phd",
+    "pmp",
+}
+
+
+def _clean_speaker_name(value):
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        text = ""
+    else:
+        text = str(value)
+    text = text.replace("<br/>", "\n").replace("<br>", "\n")
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"[^A-Za-z0-9Ññ .,'&/-]", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip(" -_,.")
+
+
+def _is_credential(value):
+    token = str(value).strip(" .").casefold()
+    return token in SPEAKER_CREDENTIALS
+
+
+def split_speaker_names(value):
+    """Split stored speaker text into person names without treating credentials as names."""
+    text = _clean_speaker_name(value)
+    if text.casefold() in INVALID_SPEAKERS:
+        return []
+
+    chunks = []
+    for line_part in re.split(r"[;\n]+", text):
+        comma_parts = [part.strip() for part in str(line_part).split(",") if part.strip()]
+        merged = []
+        for part in comma_parts:
+            if merged and _is_credential(part):
+                merged[-1] = f"{merged[-1]}, {part.strip()}"
+            else:
+                merged.append(part)
+        chunks.extend(merged)
+
+    names = []
+    seen = set()
+    for chunk in chunks:
+        for part in re.split(r"\s+(?:and|&)\s+", chunk):
+            name = _clean_speaker_name(part)
+            key = name.casefold()
+            if name and key not in INVALID_SPEAKERS and key not in seen:
+                seen.add(key)
+                names.append(name)
+    return names
 
 
 def build_sparkline(values):
@@ -42,15 +105,16 @@ def build_speaker_leaderboard(df):
     base = df.copy()
     base["No. of Attendees"] = pd.to_numeric(base.get("No. of Attendees"), errors="coerce")
     base["Date and Time"] = pd.to_datetime(base.get("Date and Time"), errors="coerce")
-    invalid_speakers = {"", "-", "nan", "none", "null", "na", "n/a"}
-    base["Speaker"] = base["Speakers"].fillna("").astype(str).str.split(",")
+    base["Speaker"] = base["Speakers"].apply(split_speaker_names)
     expanded = base.explode("Speaker")
-    expanded["Speaker"] = expanded["Speaker"].str.strip()
-    expanded = expanded[~expanded["Speaker"].str.casefold().isin(invalid_speakers)]
+    expanded["Speaker"] = expanded["Speaker"].fillna("").astype(str).str.strip()
+    expanded = expanded[~expanded["Speaker"].str.casefold().isin(INVALID_SPEAKERS)]
     if expanded.empty:
         return pd.DataFrame(columns=["Speaker", "Sessions", "Avg Attendance", "Last Session"])
 
-    grouped = expanded.groupby("Speaker", as_index=False).agg(
+    expanded["Speaker Key"] = expanded["Speaker"].str.casefold()
+    grouped = expanded.groupby("Speaker Key", as_index=False).agg(
+        Speaker=("Speaker", "first"),
         Sessions=("Event Title", "count"),
         Avg_Attendance=("No. of Attendees", "mean"),
         Last_Session=("Date and Time", "max"),

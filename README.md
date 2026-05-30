@@ -9,7 +9,7 @@ Streamlit analytics app for Data Engineering Pilipinas Meetup data, powered by M
 - Includes a Booking Calendar page for the full DEP schedule and speaker booking requests, with popup booking form validation and preserved entries on invalid submit.
 - Computes a weighted `Community Pulse Score` for quick health monitoring.
 - Uses resilient data loading with retries and snapshot fallback.
-- Normalizes speaker names and excludes missing placeholders (for example: `nan`, `none`, `null`, `-`) from ranking.
+- Normalizes speaker names, separates co-speakers joined by commas/`and`/`&`, preserves credential suffixes, and excludes missing placeholders (for example: `nan`, `none`, `null`, `-`) from ranking.
 
 ## Tech stack
 - Python 3.11+
@@ -125,6 +125,7 @@ Speaker overrides for missing past speakers:
 - Optional columns: `source`, `notes`
 - Rule: Meetup speaker names are kept; overrides are used only when past event speakers are missing.
 - Missing speaker names are rendered as blank in event tables/UI.
+- Leaderboard parsing separates co-speakers while keeping credential suffixes such as `MSDS` with the speaker name.
 
 Speaker booking requests:
 - `EVENT_BOOKINGS_PATH` (default `data/event_bookings.db` for SQLite storage; legacy CSV paths are also supported)
