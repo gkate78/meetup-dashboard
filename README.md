@@ -151,6 +151,8 @@ Speaker booking requests:
 ### Dokploy
 Use mounted storage for the runtime files and point the app at those paths. A typical Dokploy setup mounts persistent storage at `/app/data` and, if using file snapshots, `/app/cache`.
 
+- The container listens on `$PORT` when Dokploy provides it, and falls back to `8501`.
+- If you configure the proxy manually, route traffic to the same internal port (`8501` by default).
 - `FEEDBACK_DATA_PATH=/app/data/feedback.db` -> mounted `feedback.db` (SQLite) or `feedback.csv`
 - `SPEAKER_OVERRIDES_PATH=/app/data/speaker_overrides.db` -> mounted `speaker_overrides.db` (SQLite) or `speaker_overrides.csv`
 - `EVENT_BOOKINGS_PATH=/app/data/event_bookings.db` -> mounted `event_bookings.db` (SQLite) or `event_bookings.csv`
