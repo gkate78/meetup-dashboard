@@ -140,7 +140,6 @@ def render_moderator_sidebar():
                 st.success("Moderator signed in")
                 if st.button("Sign out", key="admin_sign_out"):
                     st.session_state.pop("is_moderator", None)
-                    st.session_state.pop("admin_password_input", None)
                     safe_rerun()
             else:
                 password = st.text_input(
@@ -151,7 +150,6 @@ def render_moderator_sidebar():
                 if st.button("Sign in", key="admin_sign_in"):
                     if password.strip() == ADMIN_PASSWORD:
                         st.session_state["is_moderator"] = True
-                        st.session_state.pop("admin_password_input", None)
                         safe_rerun()
                     else:
                         st.error("Invalid moderator password")
@@ -1617,10 +1615,13 @@ def render_admin_booking_page(bookings_df):
         st.info("No booking requests have been submitted yet.")
         return
 
+    status_options = ["Requested", "Approved", "Confirmed", "Cancelled", "Tentative"]
+    status_lookup = {status.casefold(): status for status in status_options}
+
     all_bookings = bookings_df.copy()
     status_filter = st.selectbox(
         "Filter by status",
-        options=["All", "Requested", "Approved", "Confirmed", "Cancelled", "Tentative"],
+        options=["All"] + status_options,
         index=0,
     )
 
@@ -1646,6 +1647,11 @@ def render_admin_booking_page(bookings_df):
             talk_title = str(booking.get("talk_title", "")).strip() or "Untitled talk"
             submitted_at = booking.get("submitted_at", "")
             current_status = str(booking.get("status", "Requested")).strip() or "Requested"
+            current_status_label = status_lookup.get(current_status.casefold(), "Requested")
+            row_status_options = status_options
+            if current_status.casefold() not in status_lookup:
+                row_status_options = [current_status] + status_options
+                current_status_label = current_status
             expander_label = f"{speaker_name} — {talk_title} [{current_status}]"
             with st.expander(expander_label, expanded=False):
                 st.write(
@@ -1660,15 +1666,14 @@ def render_admin_booking_page(bookings_df):
                 status_key = f"admin_status_{index}"
                 selected_status = st.selectbox(
                     "Status",
-                    options=["Requested", "Approved", "Confirmed", "Cancelled", "Tentative"],
-                    index=["Requested", "Approved", "Confirmed", "Cancelled", "Tentative"].index(current_status)
-                    if current_status in ["Requested", "Approved", "Confirmed", "Cancelled", "Tentative"]
-                    else 0,
+                    options=row_status_options,
+                    index=row_status_options.index(current_status_label),
                     key=status_key,
                 )
-                if selected_status != current_status:
-                    all_bookings.loc[index, "status"] = selected_status
-                    changed = True
+                all_bookings, row_changed = update_event_booking_status(
+                    all_bookings, index, selected_status
+                )
+                changed = changed or row_changed
 
         submit = st.form_submit_button("Save booking updates")
 

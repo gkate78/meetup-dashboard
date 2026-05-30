@@ -6,6 +6,7 @@ from meetup_dashboard.bookings import (
     format_event_conflict_message,
     load_event_bookings,
     save_event_booking,
+    save_event_bookings,
     slot_conflict_mask,
     update_event_booking_status,
 )
@@ -367,3 +368,30 @@ def test_update_event_booking_status_changes_status():
 
     assert changed is True
     assert updated.loc[0, "status"] == "Cancelled"
+
+
+def test_event_booking_status_update_persists_sqlite(tmp_path):
+    path = tmp_path / "event_bookings.db"
+    record = {
+        "requested_datetime": "2026-05-21T12:00:00Z",
+        "duration_minutes": 60,
+        "speaker_name": "Ana Cruz",
+        "email": "ana@example.com",
+        "talk_title": "Building Reliable Pipelines",
+        "talk_summary": "A practical talk on data pipeline reliability.",
+        "preferred_format": "Hybrid",
+        "availability_notes": "Evenings, UTC+8",
+        "status": "Requested",
+        "submitted_at": "2026-05-21T00:00:00Z",
+    }
+
+    save_event_booking(str(path), record)
+    bookings = load_event_bookings(str(path))
+    updated, changed = update_event_booking_status(bookings, 0, "Approved")
+
+    assert changed is True
+
+    save_event_bookings(str(path), updated)
+    reloaded = load_event_bookings(str(path))
+
+    assert reloaded.loc[0, "status"] == "Approved"
