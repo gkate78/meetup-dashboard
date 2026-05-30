@@ -3,11 +3,14 @@ version: "3.9"
 services:
   app:
     build: .
+    container_name: meetup-dashboard   # 👈 add this
     ports:
       - "8501:8501"
     volumes:
-      - .:/app:delegated
+      - .:/app
     environment:
       - PORT=8501
-      - STREAMLIT_SERVER_RUN_ON_SAVE=true
-    command: ["sh", "-c", "streamlit run meetup.py --server.port=${PORT:-8501} --server.address=0.0.0.0"]
+    command: >
+      sh -c "streamlit run meetup.py
+      --server.port=8501
+      --server.address=0.0.0.0"
