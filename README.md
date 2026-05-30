@@ -149,21 +149,21 @@ Speaker booking requests:
 4. (Optional) Add env vars for S3 snapshot backend.
 
 ### Dokploy
-Use mounted storage for the runtime files and point the app at those paths:
+Use mounted storage for the runtime files and point the app at those paths. A typical Dokploy setup mounts persistent storage at `/app/data` and, if using file snapshots, `/app/cache`.
 
-- `FEEDBACK_DATA_PATH` -> mounted `feedback.db` (SQLite) or `feedback.csv`
-- `SPEAKER_OVERRIDES_PATH` -> mounted `speaker_overrides.db` (SQLite) or `speaker_overrides.csv`
-- `EVENT_BOOKINGS_PATH` -> mounted `event_bookings.db` (SQLite) or `event_bookings.csv`
-- `SNAPSHOT_PATH` -> mounted cache path if you want file-based snapshots (SQLite `.db` or legacy `.json` supported)
+- `FEEDBACK_DATA_PATH=/app/data/feedback.db` -> mounted `feedback.db` (SQLite) or `feedback.csv`
+- `SPEAKER_OVERRIDES_PATH=/app/data/speaker_overrides.db` -> mounted `speaker_overrides.db` (SQLite) or `speaker_overrides.csv`
+- `EVENT_BOOKINGS_PATH=/app/data/event_bookings.db` -> mounted `event_bookings.db` (SQLite) or `event_bookings.csv`
+- `SNAPSHOT_PATH=/app/cache/meetup_snapshot.db` -> mounted cache path if you want file-based snapshots (SQLite `.db` or legacy `.json` supported)
 
-Keep `FEEDBACK_FORM_URL` empty if you want only the in-app feedback page. If you reuse this pattern in another project, the deploy only needs the same environment variables and writable data paths.
+The speaker override DB is runtime data and is intentionally ignored by Git and Docker build context. Upload or restore `speaker_overrides.db` into the mounted `/app/data` volume before launch; otherwise the app will still run, but missing-speaker overrides will not be applied. Keep `FEEDBACK_FORM_URL` empty if you want only the in-app feedback page. If you reuse this pattern in another project, the deploy only needs the same environment variables and writable data paths.
 
 ### Health checks before go-live
 1. Launch app and verify `Data source: Live API` in the caption.
 2. Temporarily remove token and confirm fallback works only when snapshot exists.
 3. Confirm event links open correctly and no table rendering breaks on special characters.
 4. Confirm charts render on desktop and mobile viewport.
-5. Confirm speaker leaderboard does not include placeholder values such as `nan` or `-`.
+5. Confirm speaker leaderboard does not include placeholder values such as `nan` or `-`, and check logs/config to verify `SPEAKER_OVERRIDES_PATH` points at the mounted override DB.
 6. Confirm the Booking Calendar page can append a booking request to persistent storage.
 
 ## Quality gates
