@@ -130,14 +130,15 @@ Speaker booking requests:
 - `EVENT_BOOKINGS_PATH` (default `data/event_bookings.db` for SQLite storage; legacy CSV paths are also supported)
 - Required columns: `requested_datetime`, `speaker_name`, `email`, `talk_title`, `submitted_at`
 - Optional columns: `duration_minutes`, `talk_summary`, `preferred_format`, `availability_notes`, `status`
-- Status values currently used in the app: `Requested`, `Tentative`, `Confirmed`, `Cancelled`
-- `ADMIN_PASSWORD` enables a moderator booking management page that lets organizers review and update request status.
+- Status values currently used in the app: `Requested`, `Approved`, `Tentative`, `Confirmed`, `Cancelled`
+- `ADMIN_PASSWORD` enables the Admin page, where signed-in moderators can review booking requests, filter by status, and update request status.
+- Existing stored status values are preserved if they do not match the built-in status list; moderators can still move those requests to a built-in status.
 - The Booking Calendar page appends each new request to the storage file and keeps it in persistent storage.
 - Future bookings are checked against existing requests and against a default DEP event window to reduce double booking.
 - The booking modal preserves entered values when a submission fails validation or conflicts, so users do not lose their input.
 - Email addresses are validated before a request is saved.
 - The booking form includes a duration in minutes so organizers can avoid overlap on the same time window.
-- Booking status can be updated from the Booking Calendar page using the "Update booking status" panel in Recent requests.
+- Booking status changes are persisted back to `EVENT_BOOKINGS_PATH`.
 
 ## Deployment runbook
 ### Streamlit Community Cloud

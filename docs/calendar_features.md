@@ -24,6 +24,9 @@ This update adds a community-focused calendar and feedback experience to the DEP
 - **Booking request support**:
   - Popup booking form for speaker slots on available calendar dates
   - Form entries are preserved on invalid submission, and email input is validated before save
+- **Moderator booking management**:
+  - The Admin page is available when `ADMIN_PASSWORD` is configured
+  - Signed-in moderators can filter booking requests and persist status changes
 - **Success snapshot** from the persisted feedback store: top events by average rating.
 
 ## ⚙️ Configuration
@@ -33,6 +36,8 @@ Set these environment variables (or Streamlit secrets):
 - `MEETUP_TOKEN` – Meetup GraphQL token
 - `FEEDBACK_FORM_URL` – Optional external feedback form URL (default empty)
 - `FEEDBACK_DATA_PATH` – Feedback CSV path stored on persistent deploy storage (default: `data/feedback.csv`)
+- `EVENT_BOOKINGS_PATH` – Booking request storage path (default: `data/event_bookings.db`)
+- `ADMIN_PASSWORD` – Optional password that enables moderator access to the Admin page
 
 ## 🧭 How feedback works
 
@@ -60,4 +65,4 @@ streamlit run meetup.py
 
 ## 📌 Notes
 
-This feature is now self-contained in-app. Future enhancements could add richer filtering or an admin dashboard for event success trends.
+This feature is now self-contained in-app. Future enhancements could add richer filtering for event success trends.
