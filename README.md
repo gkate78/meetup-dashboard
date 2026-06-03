@@ -20,11 +20,11 @@ Streamlit analytics app for Data Engineering Pilipinas Meetup data, powered by M
 - Optional snapshot backend: S3 via boto3
 
 ## Requirements
-To run the app in a new project, you need:
+To run this app, you need:
 - A Meetup GraphQL token
 - Python 3.11+
 - A writable snapshot path or S3 bucket for cached Meetup data
-- Persistent storage for feedback, speaker override, and speaker booking CSV files if you want those features enabled
+- Persistent storage for feedback, speaker overrides, and speaker booking data if you want those features enabled
 
 ## Local setup
 1. Copy example environment variables:
@@ -67,7 +67,8 @@ docker compose up --build
 You can override the data cache TTL to reduce API calls during development or testing. Example (24h cache):
 
 ```bash
-DATA_TTL_SECONDS=86400 source .venv/bin/activate && .venv/bin/python -m streamlit run meetup.py
+source .venv/bin/activate
+DATA_TTL_SECONDS=86400 .venv/bin/python -m streamlit run meetup.py
 ```
 
 If you want automated snapshot refreshes (recommended to avoid live API hits), add a scheduled job (GitHub Actions or cron) that runs the included `fetch_snapshot.py` script. The repository contains a sample GitHub Actions workflow at `.github/workflows/snapshot.yml` that runs nightly and writes the snapshot to the configured backend. By default the workflow uses the file backend and only requires the `MEETUP_TOKEN` secret; S3 is optional and can be enabled later by changing `SNAPSHOT_BACKEND` and providing S3 secrets.
@@ -79,7 +80,7 @@ The app expects these runtime files to be writable:
 - `SPEAKER_OVERRIDES_PATH` for manual speaker normalization overrides
 - `EVENT_BOOKINGS_PATH` for speaker booking requests
 
-Recommended initial schemas:
+SQLite `.db` paths are the current defaults and are created automatically when needed. If you point any of these settings to a CSV file instead, use these CSV-compatible schemas:
 ```csv
 # feedback.csv
 event_id,event_title,rating,comment,submitted_at
@@ -105,6 +106,7 @@ Optional reliability/config knobs:
 - `REQUEST_READ_TIMEOUT` (default `30`)
 - `API_MAX_RETRIES` (default `4`)
 - `API_RETRY_BASE_SECONDS` (default `1.5`)
+- `DATA_TTL_SECONDS` (default `86400`)
 
 Snapshot backend settings:
 - `SNAPSHOT_BACKEND=file|s3` (default `file`)
@@ -129,12 +131,14 @@ Speaker overrides for missing past speakers:
 
 Speaker booking requests:
 - `EVENT_BOOKINGS_PATH` (default `data/event_bookings.db` for SQLite storage; legacy CSV paths are also supported)
+- `DEP_EVENT_DURATION_MINUTES` (default `120`) controls the default existing Meetup event conflict window
+- `DEP_EVENT_TZ` (default `Asia/Manila`) controls booking display and naive datetime localization
 - Required columns: `requested_datetime`, `speaker_name`, `email`, `talk_title`, `submitted_at`
 - Optional columns: `duration_minutes`, `talk_summary`, `preferred_format`, `availability_notes`, `status`
 - Status values currently used in the app: `Requested`, `Approved`, `Tentative`, `Confirmed`, `Cancelled`
 - `ADMIN_PASSWORD` enables the Admin page, where signed-in moderators can review booking requests, filter by status, and update request status.
 - Existing stored status values are preserved if they do not match the built-in status list; moderators can still move those requests to a built-in status.
-- The Booking Calendar page appends each new request to the storage file and keeps it in persistent storage.
+- The Booking Calendar page appends each new request to the configured store and keeps it in persistent storage.
 - Future bookings are checked against existing requests and against a default DEP event window to reduce double booking.
 - The booking modal preserves entered values when a submission fails validation or conflicts, so users do not lose their input.
 - Email addresses are validated before a request is saved.
@@ -153,6 +157,8 @@ Use mounted storage for the runtime files and point the app at those paths. A ty
 
 - The container listens on `$PORT` when Dokploy provides it, and falls back to `8501`.
 - If you configure the proxy manually, route traffic to the same internal port (`8501` by default).
+- Health endpoint: `/_stcore/health` should return `ok` once Streamlit is ready.
+- If Dokploy shows Bad Gateway, first verify the app is running, the proxy target matches `$PORT`/`8501`, and the container logs include `Uvicorn server started on 0.0.0.0:<port>`.
 - `FEEDBACK_DATA_PATH=/app/data/feedback.db` -> mounted `feedback.db` (SQLite) or `feedback.csv`
 - `SPEAKER_OVERRIDES_PATH=/app/data/speaker_overrides.db` -> mounted `speaker_overrides.db` (SQLite) or `speaker_overrides.csv`
 - `EVENT_BOOKINGS_PATH=/app/data/event_bookings.db` -> mounted `event_bookings.db` (SQLite) or `event_bookings.csv`
@@ -191,12 +197,17 @@ src/meetup_dashboard/
   ├── app.py                # Streamlit app UI + data loading
   ├── bookings.py           # Speaker booking persistence and conflict helpers
   ├── metrics.py            # Speaker leaderboard and pulse scoring
-  ├── snapshot.py           # Snapshot refresh helper
-  └── services/             # Future service modules
+  └── snapshot.py           # Snapshot refresh helper
 meetup.py                  # Root Streamlit entrypoint wrapper
 fetch_snapshot.py          # Root snapshot fetch wrapper
+pages/01_Meetup_Events.py
+pages/02_KPI_Overview.py
+pages/03_Insights.py
+pages/04_Analytics.py
+pages/05_Speakers.py
 pages/06_Feedback.py       # Dedicated Feedback page entrypoint
 pages/07_Booking_Calendar.py # Dedicated Booking Calendar page entrypoint
+pages/08_Admin.py          # Moderator booking management page
 docs/
 tests/
 .github/workflows/ci.yml

@@ -2177,6 +2177,57 @@ def main():
         render_responsive_table(display_df)
 
 
+    def render_home_event_preview():
+        st.markdown('<div id="event-preview"></div>', unsafe_allow_html=True)
+        st.subheader("Event Preview")
+
+        def _prepare_preview(df, *, include_attendance=False, upcoming=True):
+            if df.empty:
+                return pd.DataFrame()
+
+            out = df.copy()
+            out["Date and Time"] = pd.to_datetime(out["Date and Time"], errors="coerce")
+            out = out.dropna(subset=["Date and Time"])
+            out = out.sort_values("Date and Time", ascending=upcoming).head(3)
+            if out.empty:
+                return out
+
+            out["Event"] = out.apply(
+                lambda row: format_event_link(row["Event Title"], row["Event URL"]),
+                axis=1,
+            )
+            out["When"] = out["Date and Time"].dt.strftime("%a, %b %d, %Y")
+            columns = ["Event", "When"]
+            if "Speakers" in out.columns:
+                out["Speaker"] = out["Speakers"].fillna("").astype(str).str.strip()
+                columns.append("Speaker")
+            if include_attendance and "No. of Attendees" in out.columns:
+                out["Attendees"] = out["No. of Attendees"]
+                columns.append("Attendees")
+            return out[columns]
+
+        upcoming_preview = _prepare_preview(df_up, upcoming=True)
+        past_preview = _prepare_preview(df_past, include_attendance=True, upcoming=False)
+        upcoming_col, past_col = st.columns(2)
+
+        with upcoming_col:
+            st.markdown("**Next Up**")
+            if upcoming_preview.empty:
+                st.info("No upcoming events found.")
+            else:
+                render_responsive_table(upcoming_preview, allow_html_columns=["Event"])
+
+        with past_col:
+            st.markdown("**Recent Events**")
+            if past_preview.empty:
+                st.info("No past events found.")
+            else:
+                render_responsive_table(past_preview, allow_html_columns=["Event"])
+
+        if hasattr(st, "page_link"):
+            st.page_link("pages/01_Meetup_Events.py", label="Open full Meetup Events page")
+
+
     # --- Insights / Story ---
     if PAGE_VIEW in ("all", "insights"):
         st.markdown('<div id="insights"></div>', unsafe_allow_html=True)
@@ -2223,7 +2274,7 @@ def main():
             bookings_df = load_event_bookings(EVENT_BOOKINGS_PATH)
             render_admin_booking_page(bookings_df)
 
-    if PAGE_VIEW == "all":
+    if PAGE_VIEW in ("all", "insights"):
         with st.expander("How Community Pulse Score works"):
             st.markdown("""
     The **Community Pulse Score** is a 0-100 health signal for this meetup community.
@@ -2416,7 +2467,7 @@ def main():
                 render_responsive_table(speaker_board)
 
     if PAGE_VIEW == "all":
-        render_meetup_events_section()
+        render_home_event_preview()
 
     st.markdown(
         '<div class="footer-text">Copyright © 2026 Katherine Bulac for Data Engineering Pilipinas Community.</div>',

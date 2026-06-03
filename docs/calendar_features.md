@@ -1,7 +1,7 @@
-# DEP Meetup Calendar Feature (Markdown)
+# DEP Meetup Calendar Feature
 
 ## 🎯 Overview
-This update adds a community-focused calendar and feedback experience to the DEP Meetup Streamlit analytics app.
+This document describes the community calendar, feedback, booking, and moderator workflow in the DEP Meetup Streamlit analytics app.
 
 ### ✅ What’s included
 
@@ -16,7 +16,7 @@ This update adds a community-focused calendar and feedback experience to the DEP
   - Event-level `⭐ avg` rating shown per event
 - **Community feedback page**:
   - In-app rating form for each event
-  - One submission per event per persisted feedback file
+  - One submission per event per persisted feedback store
   - Summary stats and recent submissions from the configured feedback store
 - **Responsive view switch**:
   - Month Grid (desktop)
@@ -35,14 +35,16 @@ Set these environment variables (or Streamlit secrets):
 
 - `MEETUP_TOKEN` – Meetup GraphQL token
 - `FEEDBACK_FORM_URL` – Optional external feedback form URL (default empty)
-- `FEEDBACK_DATA_PATH` – Feedback CSV path stored on persistent deploy storage (default: `data/feedback.csv`)
+- `FEEDBACK_DATA_PATH` – Feedback store path on persistent deploy storage (default: `data/feedback.db`; CSV paths are still supported)
 - `EVENT_BOOKINGS_PATH` – Booking request storage path (default: `data/event_bookings.db`)
 - `ADMIN_PASSWORD` – Optional password that enables moderator access to the Admin page
+- `DEP_EVENT_DURATION_MINUTES` – Default existing Meetup event conflict window in minutes (default: `120`)
+- `DEP_EVENT_TZ` – Time zone used for display and naive booking datetimes (default: `Asia/Manila`)
 
 ## 🧭 How feedback works
 
 1. When `FEEDBACK_FORM_URL` is set, each event includes an external feedback link with `event_id` and `title` query parameters.
-2. The built-in Feedback page writes submissions to the configured feedback CSV with columns:
+2. The built-in Feedback page writes submissions to the configured feedback store with columns:
    - `event_id`
    - `event_title`
    - `rating`
@@ -65,4 +67,4 @@ streamlit run meetup.py
 
 ## 📌 Notes
 
-This feature is now self-contained in-app. Future enhancements could add richer filtering for event success trends.
+The current default runtime stores are SQLite `.db` files under `data/`. CSV paths remain supported for legacy deployments.

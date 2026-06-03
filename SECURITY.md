@@ -17,7 +17,7 @@
    MEETUP_TOKEN=your-token-here
    SNAPSHOT_S3_BUCKET=your-bucket
    ```
-   Load with: `export $(cat .env | xargs)`
+   The app loads `.env` automatically in local development. If you need to load it into your shell, prefer a dotenv-aware tool instead of pasting secrets into terminal history.
 
 ### Streamlit Cloud Deployment
 1. Go to app settings → Secrets
@@ -25,6 +25,7 @@
    - `MEETUP_TOKEN`
    - `SNAPSHOT_S3_BUCKET` (if using S3)
    - Any AWS credentials (if using S3)
+   - `ADMIN_PASSWORD` (if enabling moderator access)
 
 Do NOT paste a `.env` file or `secrets.toml` content directly.
 
@@ -36,6 +37,7 @@ The `.gitignore` file prevents these from being committed:
 - `.env*` - Environment variable files
 - `aws_credentials.json` - AWS credential files
 - `.aws/` - AWS CLI config directory
+- Runtime SQLite databases under `data/`, known runtime CSV files under `data/`, and cache files under `cache/`
 
 ### Pre-commit Hook (Recommended)
 Install a pre-commit hook to catch secrets before they're committed:
@@ -45,8 +47,8 @@ pip install pre-commit detect-secrets
 pre-commit install
 ```
 
-### Scanning Existing History (Already Done)
-This repository has been scanned. No actual secrets were found in commits.
+### Scanning Existing History
+If you are preparing this repository for wider sharing, scan the current tree and history before changing visibility. Treat any finding as sensitive until the secret has been rotated.
 
 ## Rotating the MEETUP_TOKEN
 
@@ -79,7 +81,7 @@ streamlit run meetup.py
 - Streamlit will redeploy automatically
 
 ### 4. Verify Everything Works
-- Check your app logs for "Data source: Live API" 
+- Check your app logs for "Data source: Live API"
 - Verify events load correctly
 - Check Meetup API quota hasn't been exceeded
 
@@ -87,24 +89,15 @@ streamlit run meetup.py
 - Log back into Meetup.com → Account → API
 - Revoke or delete the old token so it can't be used elsewhere
 
-### 6. Push Your Changes
-```bash
-git add .gitignore SECURITY.md
-git commit -m "chore: enhance security - rotate token and add guidelines"
-git push
-# Now safe to make repo public
-```
-
 ## If a Secret Was Leaked
 If you accidentally commit a secret:
 
 1. **Rotate immediately** - get a new token/key/password
-2. **Remove from history** (if repo is still private):
+2. **Remove from history** if needed. Prefer `git filter-repo` or the official GitHub sensitive-data removal process:
    ```bash
-   git filter-branch --index-filter 'git rm --cached --ignore-unmatch <file>' HEAD
-   git push origin --force-all
+   git filter-repo --path <file> --invert-paths
    ```
-3. **Force-push only if repo is private** and hasn't been cloned by others
+3. Coordinate any force-push carefully, especially if other people may have cloned the repository.
 
 ## Code Review Checklist
 Before committing:
