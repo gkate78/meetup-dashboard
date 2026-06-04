@@ -1,10 +1,7 @@
 services:
   app:
     build: .
-    container_name: meetup-dashboard
     ports:
-      - "${PORT:-8501}:${PORT:-8501}"
-    volumes:
-      - .:/app
+      - "8501:8501"
     environment:
-      PORT: ${PORT:-8501}
+      PORT: 8501
