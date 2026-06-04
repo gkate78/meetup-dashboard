@@ -155,6 +155,18 @@ Speaker booking requests:
 ### Dokploy
 Use mounted storage for the runtime files and point the app at those paths. A typical Dokploy setup mounts persistent storage at `/app/data` and, if using file snapshots, `/app/cache`.
 
+#### Deployment checklist
+1. Set the runtime secret `MEETUP_TOKEN` in Dokploy.
+2. Mount persistent volumes at `/app/data` and `/app/cache`.
+3. Keep the app port set to `8501` (or map Dokploy's `$PORT` to the container's `8501`).
+4. Leave `SNAPSHOT_BACKEND=file` unless you also configure S3 credentials.
+5. Verify `/app/data` contains writable SQLite DBs for feedback, speaker overrides, and bookings.
+6. Confirm the health endpoint `/_stcore/health` responds with `200` after startup.
+
+The repository's compose file already uses named volumes for this layout:
+- `meetup_data` -> `/app/data`
+- `meetup_cache` -> `/app/cache`
+
 - The container listens on `$PORT` when Dokploy provides it, and falls back to `8501`.
 - If you configure the proxy manually, route traffic to the same internal port (`8501` by default).
 - Health endpoint: `/_stcore/health` should return `ok` once Streamlit is ready.

@@ -5,12 +5,14 @@ import logging
 import os
 import random
 import re
-import time
-from datetime import date, datetime, time, timezone
-from typing import Any
+import time as time_module
+from datetime import UTC, date, datetime
+from datetime import time as dt_time
+from typing import Any, cast
 from urllib.parse import quote_plus, urlparse
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
 
 def _resolve_data_path(path: str) -> str:
     value = str(path or "").strip()
@@ -26,7 +28,7 @@ def _load_local_dotenv() -> None:
         return
 
     try:
-        with open(dotenv_path, "r", encoding="utf-8") as handle:
+        with open(dotenv_path, encoding="utf-8") as handle:
             for line in handle:
                 raw = line.strip()
                 if not raw or raw.startswith("#"):
@@ -60,7 +62,7 @@ from streamlit.errors import StreamlitSecretNotFoundError
 from .bookings import (
     DEFAULT_EVENT_DURATION_MINUTES,
     DEP_EVENT_TZ,
-    booking_conflict_mask,
+    _display_timestamp,
     first_booking_conflict,
     first_event_conflict_row,
     format_booking_conflict_message,
@@ -68,9 +70,7 @@ from .bookings import (
     load_event_bookings,
     save_event_booking,
     save_event_bookings,
-    slot_conflict_mask,
     update_event_booking_status,
-    _display_timestamp,
 )
 from .metrics import build_speaker_leaderboard, compute_pulse, safe_metric, split_speaker_names
 
@@ -163,7 +163,9 @@ def render_moderator_sidebar():
 
 API_URL = "https://api.meetup.com/gql-ext"
 URLNAME = "data-engineering-pilipinas"
-SPEAKER_OVERRIDES_PATH = _resolve_data_path(os.getenv("SPEAKER_OVERRIDES_PATH", "data/speaker_overrides.db"))
+SPEAKER_OVERRIDES_PATH = _resolve_data_path(
+    os.getenv("SPEAKER_OVERRIDES_PATH", "data/speaker_overrides.db")
+)
 SNAPSHOT_PATH = _resolve_data_path(os.getenv("SNAPSHOT_PATH", "cache/meetup_snapshot.db"))
 SNAPSHOT_BACKEND = os.getenv("SNAPSHOT_BACKEND", "file").strip().lower()
 SNAPSHOT_S3_BUCKET = os.getenv("SNAPSHOT_S3_BUCKET", "").strip()
@@ -174,11 +176,12 @@ REQUEST_TIMEOUT = (
 )
 MAX_RETRIES = int(os.getenv("API_MAX_RETRIES", "4"))
 RETRY_BASE_SECONDS = float(os.getenv("API_RETRY_BASE_SECONDS", "1.5"))
-PAGE_VIEW = (
+_page_value = (
     st.session_state.get("DEP_PAGE")
     if "DEP_PAGE" in st.session_state
     else os.getenv("DEP_PAGE", "all")
-).strip().lower()
+)
+PAGE_VIEW = str(_page_value or "").strip().lower()
 
 # How long to cache dashboard data (seconds). Increase to reduce API calls.
 # Default to 24 hours since the meetup data doesn't change frequently.
@@ -290,8 +293,7 @@ def _ensure_feedback_sqlite_schema(path: str) -> None:
     import sqlite3
 
     with sqlite3.connect(path) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS feedback (
                 event_id TEXT,
                 event_title TEXT,
@@ -299,8 +301,7 @@ def _ensure_feedback_sqlite_schema(path: str) -> None:
                 comment TEXT,
                 submitted_at TEXT
             )
-            """
-        )
+            """)
         conn.commit()
 
 
@@ -308,14 +309,18 @@ def _load_feedback_from_sqlite(path: str) -> pd.DataFrame:
     import sqlite3
 
     if not os.path.exists(path):
-        return pd.DataFrame(columns=["event_id", "event_title", "rating", "comment", "submitted_at"])
+        return pd.DataFrame(
+            columns=["event_id", "event_title", "rating", "comment", "submitted_at"]
+        )
     _ensure_feedback_sqlite_schema(path)
     try:
         with sqlite3.connect(path) as conn:
             return pd.read_sql_query("SELECT * FROM feedback", conn)
     except Exception as exc:
         logger.warning("Unable to load feedback data from SQLite %s: %s", path, exc)
-        return pd.DataFrame(columns=["event_id", "event_title", "rating", "comment", "submitted_at"])
+        return pd.DataFrame(
+            columns=["event_id", "event_title", "rating", "comment", "submitted_at"]
+        )
 
 
 def _ensure_snapshot_sqlite_schema(path: str) -> None:
@@ -325,15 +330,13 @@ def _ensure_snapshot_sqlite_schema(path: str) -> None:
     import sqlite3
 
     with sqlite3.connect(path) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS snapshot (
                 saved_at TEXT,
                 member_count INTEGER,
                 payload_json TEXT
             )
-            """
-        )
+            """)
         conn.commit()
 
 
@@ -362,7 +365,8 @@ def _load_snapshot_from_sqlite(path: str) -> dict[str, Any] | None:
             row = conn.execute("SELECT payload_json FROM snapshot LIMIT 1").fetchone()
         if not row or not row[0]:
             return None
-        return json.loads(row[0])
+        payload = json.loads(row[0])
+        return cast(dict[str, Any], payload)
     except Exception as exc:
         logger.warning("Unable to load snapshot data from SQLite %s: %s", path, exc)
         return None
@@ -458,14 +462,12 @@ def _ensure_speaker_overrides_sqlite_schema(path: str) -> None:
     import sqlite3
 
     with sqlite3.connect(path) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS speaker_overrides (
                 event_id TEXT,
                 canonical_speakers TEXT
             )
-            """
-        )
+            """)
         conn.commit()
 
 
@@ -717,7 +719,7 @@ def render_booking_request_form(events_df, default_date=None, form_key="booking_
         st.markdown(f"**Request a slot on {booking_date.strftime('%B %d, %Y')}**")
         request_time = st.time_input(
             "Start time",
-            value=st.session_state.get(f"{form_key}_time", time(18, 0)),
+            value=st.session_state.get(f"{form_key}_time", dt_time(18, 0)),
             key=f"{form_key}_time",
         )
         duration_minutes = st.number_input(
@@ -782,7 +784,7 @@ def render_booking_request_form(events_df, default_date=None, form_key="booking_
                             "preferred_format": preferred_format,
                             "availability_notes": str(availability_notes).strip(),
                             "status": "Requested",
-                            "submitted_at": datetime.now(timezone.utc).isoformat(),
+                            "submitted_at": datetime.now(UTC).isoformat(),
                         },
                     )
                     _clear_booking_modal()
@@ -804,12 +806,16 @@ def _render_booking_modal(events_df, default_date):
     unique_form_key = f"booking_popup_form_{default_date.isoformat()}"
     if hasattr(st, "modal"):
         with st.modal("Request a booking slot", key=f"booking_modal_{default_date.isoformat()}"):
-            render_booking_request_form(events_df, default_date=default_date, form_key=unique_form_key)
+            render_booking_request_form(
+                events_df, default_date=default_date, form_key=unique_form_key
+            )
             if st.button("Cancel", key=f"booking_modal_cancel_{default_date.isoformat()}"):
                 _clear_booking_modal()
                 st.rerun()
     else:
-        st.warning("Your browser does not support the native popup modal. The booking form is shown below.")
+        st.warning(
+            "Your browser does not support the native popup modal. The booking form is shown below."
+        )
         render_booking_request_form(events_df, default_date=default_date, form_key=unique_form_key)
 
 
@@ -841,7 +847,9 @@ def _calendar_day_meta(events, feedback_by_event, state):
     return '<span class="calendar-day-meta">•</span>'
 
 
-def _render_calendar_day_cell(day, state, events_by_day, modal_date_raw, feedback_by_event, bookings_by_day):
+def _render_calendar_day_cell(
+    day, state, events_by_day, modal_date_raw, feedback_by_event, bookings_by_day
+):
     day_number = f'<span class="calendar-day-number">{day.day}</span>'
     booking_tooltip = _booking_requests_tooltip(bookings_by_day.get(day, []))
     if state == "open":
@@ -868,10 +876,7 @@ def _render_calendar_day_cell(day, state, events_by_day, modal_date_raw, feedbac
         tooltip = _past_day_tooltip(day)
         if booking_tooltip:
             tooltip = f"{tooltip} • {booking_tooltip}"
-        return (
-            f'<div class="calendar-day-btn past-empty" title="{tooltip}">' 
-            f"{day_number}</div>"
-        )
+        return f'<div class="calendar-day-btn past-empty" title="{tooltip}">' f"{day_number}</div>"
     return f'<div class="calendar-day-btn disabled">{day_number}</div>'
 
 
@@ -895,10 +900,18 @@ def render_calendar_booking_grid(
         df.groupby("Date", observed=True).apply(lambda d: d.to_dict(orient="records")).to_dict()
     )
     bookings_df = load_event_bookings(EVENT_BOOKINGS_PATH)
-    bookings_df = bookings_df[~bookings_df["status"].astype(str).str.strip().str.casefold().eq("cancelled")].copy()
+    bookings_df = bookings_df[
+        ~bookings_df["status"].astype(str).str.strip().str.casefold().eq("cancelled")
+    ].copy()
     if not bookings_df.empty:
-        bookings_df["Date"] = pd.to_datetime(bookings_df["requested_datetime"], errors="coerce").dt.date
-        bookings_by_day = bookings_df.groupby("Date", observed=True).apply(lambda d: d.to_dict(orient="records")).to_dict()
+        bookings_df["Date"] = pd.to_datetime(
+            bookings_df["requested_datetime"], errors="coerce"
+        ).dt.date
+        bookings_by_day = (
+            bookings_df.groupby("Date", observed=True)
+            .apply(lambda d: d.to_dict(orient="records"))
+            .to_dict()
+        )
     else:
         bookings_by_day = {}
     feedback_by_event = {}
@@ -906,7 +919,9 @@ def render_calendar_booking_grid(
         fb = feedback_df.copy()
         fb["rating"] = pd.to_numeric(fb["rating"], errors="coerce")
         fb = fb.dropna(subset=["rating"])
-        feedback_by_event = fb.groupby("event_id", observed=True)["rating"].mean().round(1).to_dict()
+        feedback_by_event = (
+            fb.groupby("event_id", observed=True)["rating"].mean().round(1).to_dict()
+        )
     today = pd.Timestamp.now(tz=DEP_EVENT_TZ).date()
     cal = calendar.Calendar(firstweekday=6)
     month_days = list(cal.monthdatescalendar(selected_year, selected_month))
@@ -914,28 +929,29 @@ def render_calendar_booking_grid(
 
     table_rows = [
         '<table class="calendar-table">',
-        '<thead><tr>'
-        '<th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th>'
-        '<th>Thu</th><th>Fri</th><th>Sat</th>'
-        '</tr></thead>',
-        '<tbody>',
+        "<thead><tr>"
+        "<th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th>"
+        "<th>Thu</th><th>Fri</th><th>Sat</th>"
+        "</tr></thead>",
+        "<tbody>",
     ]
     for week in month_days:
         row_cells = ["<tr>"]
         for day in week:
             state = _calendar_day_state(day, selected_month, events_by_day, today)
             row_cells.append(
-                '<td class="calendar-day ' +
-                ("current-month" if day.month == selected_month else "other-month") +
-                '">' +
-                _render_calendar_day_cell(day, state, events_by_day, modal_date_raw, feedback_by_event, bookings_by_day) +
-                '</td>'
+                '<td class="calendar-day '
+                + ("current-month" if day.month == selected_month else "other-month")
+                + '">'
+                + _render_calendar_day_cell(
+                    day, state, events_by_day, modal_date_raw, feedback_by_event, bookings_by_day
+                )
+                + "</td>"
             )
         row_cells.append("</tr>")
         table_rows.append("".join(row_cells))
     table_rows.append("</tbody></table>")
     calendar_html = "".join(table_rows)
-
 
     st.markdown(
         """
@@ -1080,12 +1096,17 @@ def render_calendar_booking_grid(
     )
 
     st.markdown('<div class="dep-calendar-layout">', unsafe_allow_html=True)
-    st.markdown('<div class="calendar-legend">'
-                '<span><span class="legend-dot legend-open"></span>Open for booking</span>'
-                '<span><span class="legend-dot legend-event"></span>Event day</span>'
-                '<span><span class="legend-dot legend-past"></span>Past event</span>'
-                '</div>', unsafe_allow_html=True)
-    st.markdown('<div class="calendar-table-wrapper">' + calendar_html + '</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="calendar-legend">'
+        '<span><span class="legend-dot legend-open"></span>Open for booking</span>'
+        '<span><span class="legend-dot legend-event"></span>Event day</span>'
+        '<span><span class="legend-dot legend-past"></span>Past event</span>'
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="calendar-table-wrapper">' + calendar_html + "</div>", unsafe_allow_html=True
+    )
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -1102,10 +1123,7 @@ def format_feedback_link(event_id, title):
         return ""
     safe_title = sanitize_title(title)
     event_id = str(event_id).strip()
-    url = (
-        f"{FEEDBACK_FORM_URL}?event_id={quote_plus(event_id)}"
-        f"&title={quote_plus(safe_title)}"
-    )
+    url = f"{FEEDBACK_FORM_URL}?event_id={quote_plus(event_id)}" f"&title={quote_plus(safe_title)}"
     return f'<a href="{html.escape(url)}" target="_blank" rel="noopener noreferrer">Feedback</a>'
 
 
@@ -1142,7 +1160,7 @@ def gql_request(query, variables):
             elif status_code == 429:
                 wait_seconds = int(retry_after) if str(retry_after).isdigit() else 10
                 st.warning(f"Rate limit hit (429). Waiting {wait_seconds} seconds before retry...")
-                time.sleep(wait_seconds)
+                time_module.sleep(wait_seconds)
             else:
                 st.error(f"HTTP Error {status_code}: {e}")
             if attempt < MAX_RETRIES - 1:
@@ -1150,7 +1168,7 @@ def gql_request(query, variables):
                 logger.warning(
                     "API request failed with HTTP %s. retry_in=%.2fs", status_code, backoff
                 )
-                time.sleep(backoff)
+                time_module.sleep(backoff)
             else:
                 raise
         except requests.exceptions.RequestException as e:
@@ -1158,7 +1176,7 @@ def gql_request(query, variables):
             if attempt < MAX_RETRIES - 1:
                 backoff = RETRY_BASE_SECONDS * (2**attempt) + random.uniform(0, 0.35)
                 logger.warning("API request exception. retry_in=%.2fs error=%s", backoff, e)
-                time.sleep(backoff)
+                time_module.sleep(backoff)
             else:
                 raise
 
@@ -1233,8 +1251,12 @@ def load_data(urlname):
                 "Speakers": format_speakers(e["node"].get("speakerDetails")),
             }
         )
-    df_up = pd.DataFrame(upcoming_rows) if upcoming_rows else pd.DataFrame(
-        columns=["Event ID", "Event Title", "Date and Time", "Event URL", "Online?", "Speakers"]
+    df_up = (
+        pd.DataFrame(upcoming_rows)
+        if upcoming_rows
+        else pd.DataFrame(
+            columns=["Event ID", "Event Title", "Date and Time", "Event URL", "Online?", "Speakers"]
+        )
     )
 
     # --- Past ---
@@ -1440,7 +1462,9 @@ def render_feedback_submission(feedback_df, df_up, df_past):
         fb = feedback_df.copy()
         fb["rating"] = pd.to_numeric(fb["rating"], errors="coerce")
         fb = fb.dropna(subset=["rating"])
-        feedback_by_event = fb.groupby("event_id", observed=True)["rating"].mean().round(1).to_dict()
+        feedback_by_event = (
+            fb.groupby("event_id", observed=True)["rating"].mean().round(1).to_dict()
+        )
 
     page = st.session_state.get("DEP_PAGE", "all")
     with st.expander("Submit feedback for an event", expanded=page == "feedback"):
@@ -1451,7 +1475,9 @@ def render_feedback_submission(feedback_df, df_up, df_past):
                 f"<div style='margin-bottom:8px;'>Existing feedback: {total_ratings} rating{'s' if total_ratings != 1 else ''} submitted, average score {avg_score:.1f}</div>",
                 unsafe_allow_html=True,
             )
-        event_options = ["-- Select event --"] + [f"{eid} — {title}" for eid, title in event_map.items()]
+        event_options = ["-- Select event --"] + [
+            f"{eid} — {title}" for eid, title in event_map.items()
+        ]
         star_options = [
             "⭐☆☆☆☆ (1)",
             "⭐⭐☆☆☆ (2)",
@@ -1511,7 +1537,9 @@ def render_community_calendar_section(feedback_df, df_up, df_past, narrow_viewpo
         ],
         ignore_index=True,
     )
-    calendar_data["Date and Time"] = pd.to_datetime(calendar_data.get("Date and Time"), errors="coerce")
+    calendar_data["Date and Time"] = pd.to_datetime(
+        calendar_data.get("Date and Time"), errors="coerce"
+    )
     calendar_data = calendar_data.dropna(subset=["Date and Time"]).sort_values("Date and Time")
 
     if calendar_data.empty:
@@ -1688,6 +1716,7 @@ if __name__ == "__main__":
     except Exception as e:
         logger.warning("Sidebar logo render failed: %s", e)
 
+
 def main():
     st.set_page_config(page_title="DEP Meetup Dashboard", layout="wide")
 
@@ -1696,10 +1725,14 @@ def main():
         os.environ["DEP_PAGE"] = "all"
 
     PAGE_VIEW = (
-        st.session_state.get("DEP_PAGE")
-        if "DEP_PAGE" in st.session_state
-        else os.getenv("DEP_PAGE", "all")
-    ).strip().lower()
+        (
+            st.session_state.get("DEP_PAGE")
+            if "DEP_PAGE" in st.session_state
+            else os.getenv("DEP_PAGE", "all")
+        )
+        .strip()
+        .lower()
+    )
 
     render_moderator_sidebar()
 
@@ -1978,7 +2011,6 @@ def main():
         unsafe_allow_html=True,
     )
 
-
     viewport_width = get_viewport_width()
     is_narrow = viewport_width is not None and viewport_width < 800
     if viewport_width is not None:
@@ -2034,7 +2066,9 @@ def main():
             fb = feedback_df.copy()
             fb["rating"] = pd.to_numeric(fb["rating"], errors="coerce")
             fb = fb.dropna(subset=["rating"])
-            feedback_by_event = fb.groupby("event_id", observed=True)["rating"].mean().round(1).to_dict()
+            feedback_by_event = (
+                fb.groupby("event_id", observed=True)["rating"].mean().round(1).to_dict()
+            )
             feedback_counts = fb.groupby("event_id", observed=True).size().to_dict()
 
         raw_all = pd.concat([df_up, df_past], ignore_index=True)
@@ -2043,10 +2077,14 @@ def main():
         available_years = sorted(raw_all["Date and Time"].dt.year.unique().tolist())
         past_year = None
         if not df_past.empty:
-            past_years = pd.to_datetime(df_past.get("Date and Time"), errors="coerce").dt.year.dropna()
+            past_years = pd.to_datetime(
+                df_past.get("Date and Time"), errors="coerce"
+            ).dt.year.dropna()
             if not past_years.empty:
                 past_year = int(past_years.max())
-        default_year = past_year or (available_years[-1] if available_years else pd.Timestamp.now().year)
+        default_year = past_year or (
+            available_years[-1] if available_years else pd.Timestamp.now().year
+        )
         year_index = available_years.index(default_year) if default_year in available_years else 0
         year_value = raw_year.selectbox("Filter year", options=available_years, index=year_index)
 
@@ -2083,13 +2121,14 @@ def main():
             if not df_up_filtered.empty:
                 df_up_display = df_up_filtered.copy()
                 date_fmt = "%a, %b %d, %Y" if compact_view else "%a, %b %d, %Y %I:%M %p"
-                df_up_display["Date and Time"] = pd.to_datetime(df_up_display["Date and Time"]).dt.strftime(
-                    date_fmt
-                )
+                df_up_display["Date and Time"] = pd.to_datetime(
+                    df_up_display["Date and Time"]
+                ).dt.strftime(date_fmt)
                 df_up_display["Event Title"] = df_up_display.apply(
                     lambda row: format_event_link(row["Event Title"], row["Event URL"]),
                     axis=1,
                 )
+
                 def _event_feedback_cell(row):
                     event_id = str(row.get("Event ID", "")).strip()
                     link = format_feedback_link(event_id, row.get("Event Title", ""))
@@ -2104,8 +2143,12 @@ def main():
                 if compact_view:
                     df_up_display = df_up_display[["Event Title", "Date and Time", "Feedback"]]
                 else:
-                    df_up_display = df_up_display.drop(columns=["Event URL", "Event ID"], errors="ignore")
-                render_responsive_table(df_up_display, allow_html_columns=["Event Title", "Feedback"])
+                    df_up_display = df_up_display.drop(
+                        columns=["Event URL", "Event ID"], errors="ignore"
+                    )
+                render_responsive_table(
+                    df_up_display, allow_html_columns=["Event Title", "Feedback"]
+                )
             else:
                 st.info("No upcoming events found.")
 
@@ -2118,11 +2161,14 @@ def main():
                     "Date and Time", ascending=False
                 ).reset_index(drop=True)
                 date_fmt = "%a, %b %d, %Y" if compact_view else "%a, %b %d, %Y %I:%M %p"
-                df_past_display["Date and Time"] = df_past_display["Date and Time"].dt.strftime(date_fmt)
+                df_past_display["Date and Time"] = df_past_display["Date and Time"].dt.strftime(
+                    date_fmt
+                )
                 df_past_display["Event Title"] = df_past_display.apply(
                     lambda row: format_event_link(row["Event Title"], row["Event URL"]),
                     axis=1,
                 )
+
                 def _event_feedback_cell(row):
                     event_id = str(row.get("Event ID", "")).strip()
                     link = format_feedback_link(event_id, row.get("Event Title", ""))
@@ -2142,7 +2188,9 @@ def main():
                     df_past_display = df_past_display.drop(
                         columns=["Event URL", "Event ID"], errors="ignore"
                     )
-                render_responsive_table(df_past_display, allow_html_columns=["Event Title", "Feedback"])
+                render_responsive_table(
+                    df_past_display, allow_html_columns=["Event Title", "Feedback"]
+                )
             else:
                 st.info("No past events found.")
 
@@ -2173,9 +2221,10 @@ def main():
         )
 
         display_df = fb["event_id event_title rating comment submitted_at".split()].copy()
-        display_df["submitted_at"] = display_df["submitted_at"].dt.strftime("%Y-%m-%d %H:%M UTC").fillna("")
+        display_df["submitted_at"] = (
+            display_df["submitted_at"].dt.strftime("%Y-%m-%d %H:%M UTC").fillna("")
+        )
         render_responsive_table(display_df)
-
 
     def render_home_event_preview():
         st.markdown('<div id="event-preview"></div>', unsafe_allow_html=True)
@@ -2227,7 +2276,6 @@ def main():
         if hasattr(st, "page_link"):
             st.page_link("pages/01_Meetup_Events.py", label="Open full Meetup Events page")
 
-
     # --- Insights / Story ---
     if PAGE_VIEW in ("all", "insights"):
         st.markdown('<div id="insights"></div>', unsafe_allow_html=True)
@@ -2259,9 +2307,7 @@ def main():
 
     if PAGE_VIEW == "calendar":
         calendar_events = pd.concat([df_up, df_past], ignore_index=True)
-        render_community_calendar_section(
-            feedback_df, df_up, df_past, narrow_viewport=is_narrow
-        )
+        render_community_calendar_section(feedback_df, df_up, df_past, narrow_viewport=is_narrow)
         render_booking_section(calendar_events)
 
     if PAGE_VIEW == "admin":
@@ -2293,7 +2339,7 @@ def main():
     **Important note**
     - This score supports decisions, but it should be read with the detailed KPIs and charts below.
     """)
-            
+
         st.subheader("Community Insights")
 
         if df_past.empty and df_up.empty:
@@ -2324,9 +2370,7 @@ def main():
                     next_event["Date and Time"], errors="coerce"
                 )
                 next_event = (
-                    next_event.dropna(subset=["Date and Time"])
-                    .sort_values("Date and Time")
-                    .head(1)
+                    next_event.dropna(subset=["Date and Time"]).sort_values("Date and Time").head(1)
                 )
                 next_event = next_event.iloc[0] if not next_event.empty else df_up.iloc[0]
                 next_dt = pd.to_datetime(next_event.get("Date and Time"), errors="coerce")
@@ -2348,7 +2392,6 @@ def main():
                     f"Next event: **[{next_event['Event Title']}]({next_event['Event URL']})** "
                     f"on **{next_dt_str}** | **{mode_text}**{speaker_text}"
                 )
-
 
     # --- Metrics ---
     if PAGE_VIEW in ("all", "kpi"):
@@ -2406,7 +2449,9 @@ def main():
                 "Nov",
                 "Dec",
             ]
-            monthly["Month"] = pd.Categorical(monthly["Month"], categories=month_order, ordered=True)
+            monthly["Month"] = pd.Categorical(
+                monthly["Month"], categories=month_order, ordered=True
+            )
             monthly_rollup = (
                 monthly.groupby(["Year", "Month"], observed=True)["No. of Attendees"]
                 .mean()
@@ -2414,7 +2459,9 @@ def main():
             )
             monthly_rollup = monthly_rollup.sort_values(["Year", "Month"])
 
-            heatmap_data = monthly_rollup.pivot(index="Year", columns="Month", values="Avg Attendance")
+            heatmap_data = monthly_rollup.pivot(
+                index="Year", columns="Month", values="Avg Attendance"
+            )
             heatmap_data = heatmap_data.reindex(columns=month_order)
             heatmap_data.index = pd.to_numeric(heatmap_data.index, errors="coerce")
             heatmap_data = heatmap_data.sort_index(ascending=False)
@@ -2473,6 +2520,7 @@ def main():
         '<div class="footer-text">Copyright © 2026 Katherine Bulac for Data Engineering Pilipinas Community.</div>',
         unsafe_allow_html=True,
     )
+
 
 if __name__ == "__main__":
     main()

@@ -1,7 +1,14 @@
+from meetup_dashboard.app import (
+    load_feedback_data,
+    load_snapshot,
+    load_speaker_overrides,
+    save_feedback_data,
+    save_snapshot,
+)
 from meetup_dashboard.bookings import (
     booking_conflict_mask,
-    first_event_conflict_row,
     first_booking_conflict,
+    first_event_conflict_row,
     format_booking_conflict_message,
     format_event_conflict_message,
     load_event_bookings,
@@ -9,13 +16,6 @@ from meetup_dashboard.bookings import (
     save_event_bookings,
     slot_conflict_mask,
     update_event_booking_status,
-)
-from meetup_dashboard.app import (
-    load_feedback_data,
-    load_speaker_overrides,
-    load_snapshot,
-    save_feedback_data,
-    save_snapshot,
 )
 
 
@@ -98,16 +98,8 @@ def test_snapshot_storage_roundtrip_sqlite(tmp_path):
 
     meetup_app.SNAPSHOT_PATH = str(path)
 
-    df_up = pd.DataFrame(
-        [
-            {"id": "evt-1", "title": "Future Meetup", "date": "2026-06-01"}
-        ]
-    )
-    df_past = pd.DataFrame(
-        [
-            {"id": "evt-0", "title": "Past Meetup", "date": "2026-04-01"}
-        ]
-    )
+    df_up = pd.DataFrame([{"id": "evt-1", "title": "Future Meetup", "date": "2026-06-01"}])
+    df_past = pd.DataFrame([{"id": "evt-0", "title": "Past Meetup", "date": "2026-04-01"}])
 
     save_snapshot(df_up, df_past, member_count=1200)
     snapshot = load_snapshot()
@@ -124,6 +116,7 @@ def test_snapshot_storage_roundtrip_sqlite(tmp_path):
 def test_load_speaker_overrides_sqlite(tmp_path):
     path = tmp_path / "speaker_overrides.db"
     import sqlite3
+
     import pandas as pd
 
     records = [

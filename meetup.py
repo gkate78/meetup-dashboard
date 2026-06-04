@@ -6,7 +6,7 @@ import streamlit as st
 ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(ROOT_DIR, "src"))
 
-from meetup_dashboard.app import *  # noqa: F401,F403
+from meetup_dashboard.app import main  # noqa: E402
 
 if __name__ == "__main__":
     os.environ["DEP_PAGE"] = "all"

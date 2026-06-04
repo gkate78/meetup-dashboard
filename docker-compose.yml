@@ -5,3 +5,16 @@ services:
       - "8501:8501"
     environment:
       PORT: 8501
+      MEETUP_TOKEN: ${MEETUP_TOKEN:-}
+      FEEDBACK_DATA_PATH: /app/data/feedback.db
+      SPEAKER_OVERRIDES_PATH: /app/data/speaker_overrides.db
+      EVENT_BOOKINGS_PATH: /app/data/event_bookings.db
+      SNAPSHOT_PATH: /app/cache/meetup_snapshot.db
+      SNAPSHOT_BACKEND: file
+    volumes:
+      - meetup_data:/app/data
+      - meetup_cache:/app/cache
+
+volumes:
+  meetup_data:
+  meetup_cache:

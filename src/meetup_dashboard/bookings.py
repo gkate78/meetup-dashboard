@@ -6,8 +6,8 @@ import csv
 import logging
 import os
 import sqlite3
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
+from typing import Any, cast
 
 import pandas as pd
 
@@ -40,21 +40,21 @@ DEP_EVENT_TZ = os.getenv("DEP_EVENT_TZ", "Asia/Manila")
 
 
 def _display_timestamp(value: Any, duration_minutes: int | None = None) -> str:
-    ts = _coerce_timestamp(value)
+    ts = cast(pd.Timestamp, _coerce_timestamp(value))
     if pd.isna(ts):
         return "unknown time"
-    local = ts.tz_convert(DEP_EVENT_TZ)
+    local = cast(pd.Timestamp, ts.tz_convert(DEP_EVENT_TZ))
     if duration_minutes is None:
-        return local.strftime("%Y-%m-%d %H:%M")
-    end = local + pd.Timedelta(minutes=int(duration_minutes))
+        return str(local.strftime("%Y-%m-%d %H:%M"))
+    end = cast(pd.Timestamp, local + pd.Timedelta(minutes=int(duration_minutes)))
     return f"{local.strftime('%Y-%m-%d %H:%M')} to {end.strftime('%Y-%m-%d %H:%M')}"
 
 
 def _format_utc_storage(value: Any) -> str:
-    ts = _coerce_timestamp(value)
+    ts = cast(pd.Timestamp, _coerce_timestamp(value))
     if pd.isna(ts):
         return ""
-    return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return str(ts.strftime("%Y-%m-%dT%H:%M:%SZ"))
 
 
 def _is_sqlite_path(path: str) -> bool:
@@ -66,8 +66,7 @@ def _ensure_sqlite_schema(path: str) -> None:
     if directory:
         os.makedirs(directory, exist_ok=True)
     with sqlite3.connect(path) as conn:
-        conn.execute(
-            f"""
+        conn.execute(f"""
             CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
                 requested_datetime TEXT,
                 duration_minutes INTEGER,
@@ -80,8 +79,7 @@ def _ensure_sqlite_schema(path: str) -> None:
                 status TEXT,
                 submitted_at TEXT
             )
-            """
-        )
+            """)
         conn.commit()
 
 
@@ -113,7 +111,7 @@ def active_bookings(bookings: pd.DataFrame) -> pd.DataFrame:
 
 
 def _coerce_timestamp(value: Any, reference: pd.Timestamp | None = None) -> pd.Timestamp:
-    ts = pd.to_datetime(value, errors="coerce")
+    ts = cast(pd.Timestamp, pd.to_datetime(value, errors="coerce"))
     if pd.isna(ts):
         return ts
     if ts.tzinfo is not None:
@@ -127,8 +125,10 @@ def _interval_end(start: pd.Timestamp, duration_minutes: int) -> pd.Timestamp:
     return start + pd.Timedelta(minutes=int(duration_minutes))
 
 
-def _intervals_overlap(start_a: pd.Timestamp, end_a: pd.Timestamp, start_b: pd.Timestamp, end_b: pd.Timestamp) -> bool:
-    return start_a < end_b and start_b < end_a
+def _intervals_overlap(
+    start_a: pd.Timestamp, end_a: pd.Timestamp, start_b: pd.Timestamp, end_b: pd.Timestamp
+) -> bool:
+    return bool(start_a < end_b and start_b < end_a)
 
 
 def _parse_booking_row(fields: list[str]) -> dict[str, Any]:
@@ -199,7 +199,11 @@ def _load_bookings_from_csv(path: str) -> pd.DataFrame:
             if parsed:
                 rows.append(parsed)
 
-    return pd.DataFrame(rows, columns=BOOKING_COLUMNS) if rows else pd.DataFrame(columns=BOOKING_COLUMNS)
+    return (
+        pd.DataFrame(rows, columns=BOOKING_COLUMNS)
+        if rows
+        else pd.DataFrame(columns=BOOKING_COLUMNS)
+    )
 
 
 def load_event_bookings(path: str) -> pd.DataFrame:
@@ -253,9 +257,7 @@ def save_event_booking(path: str, record: dict[str, Any]) -> None:
     if not row.get("status"):
         row["status"] = "Requested"
     row["requested_datetime"] = _format_utc_storage(row.get("requested_datetime"))
-    row["submitted_at"] = _format_utc_storage(
-        row.get("submitted_at") or datetime.now(timezone.utc)
-    )
+    row["submitted_at"] = _format_utc_storage(row.get("submitted_at") or datetime.now(UTC))
     bookings = pd.concat([bookings, pd.DataFrame([row])], ignore_index=True)
     save_event_bookings(path, bookings)
 
