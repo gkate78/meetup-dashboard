@@ -2260,7 +2260,7 @@ def main():
         upcoming_col, past_col = st.columns(2)
 
         with upcoming_col:
-            st.markdown("**Next Up**")
+            st.markdown("**Up Next**")
             if upcoming_preview.empty:
                 st.info("No upcoming events found.")
             else:
