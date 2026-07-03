@@ -18,6 +18,7 @@ Streamlit analytics app for Data Engineering Pilipinas Meetup data, powered by M
 - Plotly
 - Requests
 - Optional snapshot backend: S3 via boto3
+- Fixed light Streamlit theme for consistent readability across devices
 
 ## Requirements
 To run this app, you need:
@@ -57,6 +58,8 @@ Alternative local run with Streamlit directly:
 ```bash
 streamlit run meetup.py
 ```
+
+The app is configured to render in light mode regardless of the device theme.
 
 You can also use Docker Compose for local development:
 

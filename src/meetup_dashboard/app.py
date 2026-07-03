@@ -94,17 +94,29 @@ def sanitize_title(title):
     return clean
 
 
-def get_viewport_width():
-    params = st.query_params if hasattr(st, "query_params") else st.experimental_get_query_params()
-    raw_vw = params.get("vw")
-    if isinstance(raw_vw, list):
-        raw_vw = raw_vw[0] if raw_vw else None
-    try:
-        vw = int(raw_vw) if raw_vw is not None else None
-    except (TypeError, ValueError):
-        vw = None
+def _query_param_value(name: str) -> str | None:
+    if hasattr(st, "query_params"):
+        params = st.query_params
+    else:
+        params = st.experimental_get_query_params()  # type: ignore[attr-defined]
+    raw_value = params.get(name)
+    if isinstance(raw_value, list):
+        raw_value = raw_value[0] if raw_value else None
+    if raw_value is None:
+        return None
+    value = str(raw_value).strip()
+    return value or None
 
-    if vw is None:
+
+def ensure_client_preferences() -> tuple[str, int | None]:
+    raw_vw = _query_param_value("vw")
+    try:
+        viewport_width = int(raw_vw) if raw_vw is not None else None
+    except (TypeError, ValueError):
+        viewport_width = None
+
+    if viewport_width is None:
+        viewport_width = viewport_width or 1200
         components.html(
             """
             <script>
@@ -117,7 +129,8 @@ def get_viewport_width():
             """,
             height=0,
         )
-    return vw
+
+    return "light", viewport_width
 
 
 def safe_rerun() -> None:
@@ -968,12 +981,12 @@ def render_calendar_booking_grid(
         }
         .dep-calendar-layout .calendar-table th,
         .dep-calendar-layout .calendar-table td {
-            border: 1px solid #d7e2f1;
+            border: 1px solid var(--dep-border);
             padding: 4px;
             vertical-align: top;
         }
         .dep-calendar-layout .calendar-table th {
-            background: #1d4ed8;
+            background: var(--dep-accent);
             color: #fff;
             font-weight: 700;
             padding: 10px 6px;
@@ -985,15 +998,15 @@ def render_calendar_booking_grid(
             padding: 4px;
         }
         .dep-calendar-layout .calendar-day.current-month {
-            background: #f8fbff;
+            background: var(--dep-surface-muted);
         }
         .dep-calendar-layout .calendar-day.other-month {
-            background: #f8fafc;
+            background: var(--dep-surface-soft);
             opacity: 0.55;
         }
         .dep-calendar-layout .calendar-day-btn {
-            width: 100%; min-height: 64px; border: 1px solid #d7e2f1; border-radius: 10px;
-            font-weight: 700; font-size: 0.9rem; color: #0f172a; display: flex;
+            width: 100%; min-height: 64px; border: 1px solid var(--dep-border); border-radius: 10px;
+            font-weight: 700; font-size: 0.9rem; color: var(--dep-text); display: flex;
             flex-direction: column; align-items: center; justify-content: center;
             box-sizing: border-box; text-decoration: none; cursor: default;
             padding: 8px;
@@ -1001,39 +1014,39 @@ def render_calendar_booking_grid(
             white-space: normal;
         }
         .dep-calendar-layout .calendar-day-btn.has-event {
-            background: #e0ecff; color: #1d4ed8; box-shadow: inset 0 0 0 2px #1d4ed8;
+            background: var(--dep-accent-soft); color: var(--dep-accent); box-shadow: inset 0 0 0 2px var(--dep-accent);
         }
         .dep-calendar-layout .calendar-day-btn.past-event {
-            background: #eef2ff; color: #475569; box-shadow: inset 0 0 0 2px #94a3b8;
+            background: var(--dep-surface-soft); color: var(--dep-text-soft); box-shadow: inset 0 0 0 2px var(--dep-text-subtle);
         }
         .dep-calendar-layout .calendar-day-btn.past-empty {
-            background: #f1f5f9; color: #94a3b8;
+            background: var(--dep-surface-soft); color: var(--dep-text-subtle);
         }
         .dep-calendar-layout .calendar-day-btn.disabled {
-            background: #f8fafc; color: #94a3b8; opacity: 0.55;
+            background: var(--dep-surface-soft); color: var(--dep-text-subtle); opacity: 0.55;
         }
         .dep-calendar-layout .calendar-day-btn.open-slot {
             background: transparent;
-            color: #065f46 !important;
-            border-color: #10b981;
-            box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.25);
+            color: var(--dep-success) !important;
+            border-color: var(--dep-success);
+            box-shadow: inset 0 0 0 1px var(--dep-success-soft);
             cursor: pointer;
             text-decoration: none;
         }
         .dep-calendar-layout .calendar-day-btn.open-slot:visited {
-            color: #065f46 !important;
+            color: var(--dep-success) !important;
         }
         .dep-calendar-layout .calendar-day-btn.open-slot:hover {
-            background: rgba(16, 185, 129, 0.08);
+            background: var(--dep-success-soft);
         }
         .dep-calendar-layout .calendar-day-btn.selected-open {
-            background: #10b981;
+            background: var(--dep-success);
             color: #fff;
-            box-shadow: inset 0 0 0 2px #047857;
+            box-shadow: inset 0 0 0 2px var(--dep-success-border);
         }
         .dep-calendar-layout .booking-modal-summary {
             margin-bottom: 12px;
-            color: #475569;
+            color: var(--dep-text-soft);
         }
         .dep-calendar-layout .calendar-day-btn.open-slot .calendar-day-number {
             text-decoration: underline;
@@ -1050,13 +1063,13 @@ def render_calendar_booking_grid(
             opacity: 0.85;
         }
         .dep-calendar-layout .calendar-day-btn.has-event .calendar-day-meta {
-            color: #1d4ed8;
+            color: var(--dep-accent);
         }
         .dep-calendar-layout .calendar-day-btn.past-event .calendar-day-meta {
-            color: #475569;
+            color: var(--dep-text-soft);
         }
         .dep-calendar-layout .calendar-day-btn.open-slot .calendar-day-meta {
-            background: #10b981;
+            background: var(--dep-success);
             color: #fff;
             border-radius: 999px;
             padding: 0 6px;
@@ -1065,10 +1078,10 @@ def render_calendar_booking_grid(
         }
         .dep-calendar-layout .calendar-day.compact.other-month .calendar-day-btn {
             opacity: 0.55;
-            background: #f8fafc;
+            background: var(--dep-surface-soft);
         }
         .dep-calendar-layout .calendar-legend {
-            font-size: 0.85rem; color: #475569; margin-bottom: 10px;
+            font-size: 0.85rem; color: var(--dep-text-soft); margin-bottom: 10px;
         }
         .dep-calendar-layout .calendar-legend span {
             display: inline-flex;
@@ -1082,9 +1095,9 @@ def render_calendar_booking_grid(
             border-radius: 50%;
             display: inline-block;
         }
-        .dep-calendar-layout .calendar-legend .legend-open { background: #10b981; }
-        .dep-calendar-layout .calendar-legend .legend-event { background: #1d4ed8; }
-        .dep-calendar-layout .calendar-legend .legend-past { background: #94a3b8; }
+        .dep-calendar-layout .calendar-legend .legend-open { background: var(--dep-success); }
+        .dep-calendar-layout .calendar-legend .legend-event { background: var(--dep-accent); }
+        .dep-calendar-layout .calendar-legend .legend-past { background: var(--dep-text-subtle); }
         .dep-calendar-layout [data-testid="stForm"],
         .dep-calendar-layout [data-testid="stForm"] > div {
             background: transparent !important; border: none !important;
@@ -1724,6 +1737,9 @@ def main():
         st.session_state["DEP_PAGE"] = "all"
         os.environ["DEP_PAGE"] = "all"
 
+    _, viewport_width = ensure_client_preferences()
+    plotly_template = "plotly_white"
+
     PAGE_VIEW = (
         (
             st.session_state.get("DEP_PAGE")
@@ -1751,9 +1767,41 @@ def main():
         <style>
             :root {{
                 --header-height: 128px;
+                --dep-bg-start: #eaf2ff;
+                --dep-bg-mid: #f8fbff;
+                --dep-bg-end: #f3f7fc;
+                --dep-surface: #ffffff;
+                --dep-surface-muted: #f8fbff;
+                --dep-surface-soft: #eef3fa;
+                --dep-border: #d7e2f1;
+                --dep-border-soft: #eef3fa;
+                --dep-text: #0f172a;
+                --dep-text-muted: #334155;
+                --dep-text-soft: #475569;
+                --dep-text-subtle: #64748b;
+                --dep-accent: #1d4ed8;
+                --dep-accent-soft: #e0ecff;
+                --dep-success: #10b981;
+                --dep-success-soft: rgba(16, 185, 129, 0.08);
+                --dep-success-border: #047857;
+                --dep-gradient-start: #0f172a;
+                --dep-gradient-mid: #1d4ed8;
+                --dep-gradient-end: #0ea5e9;
+                --dep-shadow: rgba(15, 23, 42, 0.08);
+                --dep-shadow-strong: rgba(15, 23, 42, 0.2);
             }}
             .stApp {{
-                background: radial-gradient(circle at 15% 0%, #eaf2ff 0%, #f8fbff 45%, #f3f7fc 100%);
+                background: radial-gradient(
+                    circle at 15% 0%,
+                    var(--dep-bg-start) 0%,
+                    var(--dep-bg-mid) 45%,
+                    var(--dep-bg-end) 100%
+                );
+                color: var(--dep-text);
+            }}
+            html {{
+                color-scheme: light;
+                scroll-padding-top: 140px;
             }}
             div[data-testid="stSidebarNav"] li:first-child a {{
                 position: relative;
@@ -1767,9 +1815,6 @@ def main():
                 left: 0;
                 top: 0;
                 color: inherit;
-            }}
-            html {{
-                scroll-padding-top: 140px;
             }}
             .header-container {{
                 display: flex;
@@ -1800,10 +1845,15 @@ def main():
                 position: sticky;
                 top: 0;
                 z-index: 1200;
-                background: radial-gradient(circle at 15% 0%, #eaf2ff 0%, #f8fbff 45%, #f3f7fc 100%);
+                background: radial-gradient(
+                    circle at 15% 0%,
+                    var(--dep-bg-start) 0%,
+                    var(--dep-bg-mid) 45%,
+                    var(--dep-bg-end) 100%
+                );
                 backdrop-filter: blur(2px);
-                border-bottom: 1px solid #d7e2f1;
-                box-shadow: 0 6px 12px rgba(15, 23, 42, 0.08);
+                border-bottom: 1px solid var(--dep-border);
+                box-shadow: 0 6px 12px var(--dep-shadow);
                 padding: 6px 0 6px 0;
             }}
             .header-spacer {{
@@ -1816,7 +1866,8 @@ def main():
                 display: block;
                 margin: 0;
                 border-radius: 10px;
-                box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+                background: var(--dep-surface);
+                box-shadow: 0 4px 10px var(--dep-shadow);
             }}
             .header-title-wrap {{
                 display: flex;
@@ -1827,24 +1878,29 @@ def main():
             .header-title {{
                 font-size: 1.4rem;
                 font-weight: 800;
-                color: #0f172a;
+                color: var(--dep-text);
                 letter-spacing: 0.2px;
                 margin: 0;
                 line-height: 1.1;
             }}
             .header-subtitle {{
-                color: #334155;
+                color: var(--dep-text-muted);
                 margin-top: 2px;
                 font-size: 0.8rem;
                 margin: 0;
             }}
             .pulse-wrap {{
                 margin: 4px 0 18px 0;
-                background: linear-gradient(120deg, #0f172a 0%, #1d4ed8 55%, #0ea5e9 100%);
+                background: linear-gradient(
+                    120deg,
+                    var(--dep-gradient-start) 0%,
+                    var(--dep-gradient-mid) 55%,
+                    var(--dep-gradient-end) 100%
+                );
                 color: #f8fafc;
                 border-radius: 16px;
                 padding: 16px 18px;
-                box-shadow: 0 12px 24px rgba(15, 23, 42, 0.2);
+                box-shadow: 0 12px 24px var(--dep-shadow-strong);
             }}
             .pulse-title {{
                 font-size: 0.85rem;
@@ -1881,53 +1937,54 @@ def main():
                 opacity: 0.98;
             }}
             .leader-card {{
-                background: #ffffff;
-                border: 1px solid #d7e2f1;
+                background: var(--dep-surface);
+                border: 1px solid var(--dep-border);
                 border-radius: 12px;
                 padding: 12px 14px;
-                box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+                box-shadow: 0 8px 18px var(--dep-shadow);
                 margin-bottom: 10px;
             }}
             .leader-rank {{
                 font-size: 0.8rem;
-                color: #64748b;
+                color: var(--dep-text-subtle);
                 text-transform: uppercase;
                 margin-bottom: 4px;
             }}
             .leader-name {{
                 font-size: 1.03rem;
-                color: #0f172a;
+                color: var(--dep-text);
                 font-weight: 700;
                 margin-bottom: 3px;
             }}
             .leader-count {{
                 font-size: 0.9rem;
-                color: #1e293b;
+                color: var(--dep-text-soft);
             }}
             .table-wrap {{
                 width: 100%;
                 overflow-x: auto;
-                border: 1px solid #d7e2f1;
+                border: 1px solid var(--dep-border);
                 border-radius: 10px;
-                background: #ffffff;
+                background: var(--dep-surface);
             }}
             .dep-table {{
                 width: 100%;
                 border-collapse: collapse;
                 table-layout: auto;
                 font-size: 0.93rem;
+                color: var(--dep-text);
             }}
             .dep-table th {{
-                background: #f8fbff;
-                color: #0f172a;
+                background: var(--dep-surface-muted);
+                color: var(--dep-text);
                 text-align: left;
                 padding: 10px 12px;
-                border-bottom: 1px solid #d7e2f1;
+                border-bottom: 1px solid var(--dep-border);
                 white-space: nowrap;
             }}
             .dep-table td {{
                 padding: 10px 12px;
-                border-bottom: 1px solid #eef3fa;
+                border-bottom: 1px solid var(--dep-border-soft);
                 vertical-align: top;
                 white-space: normal;
                 word-break: break-word;
@@ -1940,7 +1997,7 @@ def main():
                 margin-top: 0.6rem;
             }}
             .footer-text {{
-                color: #475569;
+                color: var(--dep-text-soft);
                 font-size: 0.9rem;
                 margin: 32px auto 12px auto;
                 max-width: 1100px;
@@ -1973,7 +2030,8 @@ def main():
                     height: 2.6rem;
                     width: auto;
                     border-radius: 8px;
-                    box-shadow: 0 3px 8px rgba(15, 23, 42, 0.15);
+                    background: var(--dep-surface);
+                    box-shadow: 0 3px 8px var(--dep-shadow);
                 }}
                 .pulse-score {{
                     font-size: 2rem;
@@ -2011,7 +2069,6 @@ def main():
         unsafe_allow_html=True,
     )
 
-    viewport_width = get_viewport_width()
     is_narrow = viewport_width is not None and viewport_width < 800
     if viewport_width is not None:
         st.session_state["vw_param"] = viewport_width
@@ -2422,14 +2479,17 @@ def main():
                 hover_data={"Event Title": True, "Date and Time": True, "No. of Attendees": True},
             )
             fig_attendance.update_layout(
-                template="plotly_white",
+                template=plotly_template,
                 margin=dict(l=8, r=8, t=55, b=8),
                 title_x=0.01,
                 title_font_size=20,
-                plot_bgcolor="#ffffff",
-                paper_bgcolor="#ffffff",
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
             )
-            fig_attendance.update_traces(line=dict(color="#1d4ed8", width=3), marker=dict(size=7))
+            fig_attendance.update_traces(
+                line=dict(color="#1d4ed8", width=3),
+                marker=dict(size=7),
+            )
             st.plotly_chart(fig_attendance, use_container_width=True)
 
             monthly = df_past_sorted.copy()
@@ -2475,12 +2535,12 @@ def main():
                 labels={"x": "Month", "y": "Year", "color": "Avg Attendance"},
             )
             fig_heatmap.update_layout(
-                template="plotly_white",
+                template=plotly_template,
                 margin=dict(l=8, r=8, t=55, b=8),
                 title_x=0.01,
                 title_font_size=20,
-                plot_bgcolor="#ffffff",
-                paper_bgcolor="#ffffff",
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
             )
             fig_heatmap.update_traces(
                 hovertemplate="Year: %{y}<br>Month: %{x}<br>Avg Attendance: %{z:.1f}<extra></extra>"
