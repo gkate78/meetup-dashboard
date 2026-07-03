@@ -2,6 +2,7 @@
 
 ## 🎯 Overview
 This document describes the community calendar, feedback, booking, and moderator workflow in the DEP Meetup Streamlit analytics app.
+The app uses a fixed light Streamlit theme so the interface stays readable on devices that prefer dark mode.
 
 ### ✅ What’s included
 
