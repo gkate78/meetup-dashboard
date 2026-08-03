@@ -130,6 +130,70 @@ def test_build_speaker_leaderboard_splits_joiners_without_counting_credentials()
     assert board.loc[board["Speaker"] == "Jessie Dimanlig", "Sessions"].iloc[0] == 2
 
 
+def test_build_speaker_leaderboard_merges_name_variants_with_same_first_and_last_name():
+    df = pd.DataFrame(
+        [
+            {
+                "Event Title": "A",
+                "Date and Time": "2025-01-01",
+                "No. of Attendees": 60,
+                "Speakers": "Kristine Joy Cristobal",
+            },
+            {
+                "Event Title": "B",
+                "Date and Time": "2025-02-01",
+                "No. of Attendees": 40,
+                "Speakers": "Kristine Cristobal",
+            },
+            {
+                "Event Title": "C",
+                "Date and Time": "2025-03-01",
+                "No. of Attendees": 70,
+                "Speakers": "Johannes Paulus JP Acuña",
+            },
+            {
+                "Event Title": "D",
+                "Date and Time": "2025-04-01",
+                "No. of Attendees": 80,
+                "Speakers": "Johannes Paulus Acuña",
+            },
+        ]
+    )
+
+    board = build_speaker_leaderboard(df)
+
+    assert board.loc[board["Speaker"] == "Kristine Cristobal", "Sessions"].iloc[0] == 2
+    assert board.loc[board["Speaker"] == "Johannes Paulus Acuña", "Sessions"].iloc[0] == 2
+
+
+def test_split_speaker_names_normalizes_camel_case_and_honorifics():
+    assert split_speaker_names("SandyCabanes") == ["Sandy Cabanes"]
+
+
+def test_build_speaker_leaderboard_prefers_full_names_over_honorific_aliases():
+    df = pd.DataFrame(
+        [
+            {
+                "Event Title": "A",
+                "Date and Time": "2025-01-01",
+                "No. of Attendees": 60,
+                "Speakers": "Macky Sunga",
+            },
+            {
+                "Event Title": "B",
+                "Date and Time": "2025-02-01",
+                "No. of Attendees": 40,
+                "Speakers": "Mr Sunga",
+            },
+        ]
+    )
+
+    board = build_speaker_leaderboard(df)
+
+    assert board.loc[0, "Speaker"] == "Macky Sunga"
+    assert board.loc[0, "Sessions"] == 2
+
+
 def test_compute_pulse_structure_and_bounds():
     df_up = pd.DataFrame([{"Event Title": "up-1"}, {"Event Title": "up-2"}])
     df_past = pd.DataFrame(

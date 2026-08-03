@@ -1,4 +1,5 @@
 import re
+import unicodedata
 
 import pandas as pd
 
@@ -25,7 +26,8 @@ def _clean_speaker_name(value):
         text = str(value)
     text = text.replace("<br/>", "\n").replace("<br>", "\n")
     text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"[^A-Za-z0-9Ññ .,'&/-]", " ", text)
+    text = re.sub(r"[^\w\s.,'&/-]", " ", text)
+    text = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip(" -_,.")
 
@@ -98,6 +100,48 @@ def clamp(value, lower=0, upper=100):
     return max(lower, min(upper, value))
 
 
+def _speaker_match_key(value):
+    cleaned = _clean_speaker_name(value)
+    if not cleaned:
+        return ""
+    normalized = unicodedata.normalize("NFKD", cleaned)
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    tokens = [token for token in re.split(r"\s+", normalized) if token]
+    if not tokens:
+        return ""
+
+    alias_tokens = []
+    for token in tokens:
+        if token.casefold() in {"mr", "mrs", "ms", "miss", "dr", "prof", "engr"}:
+            continue
+        alias_tokens.append(token)
+
+    if not alias_tokens:
+        return ""
+    return alias_tokens[-1].casefold()
+
+
+def _choose_best_speaker_name(values):
+    cleaned = []
+    for value in values:
+        text = _clean_speaker_name(value)
+        if text:
+            text = re.sub(r"\b(?:jp|jr|sr|ii|iii|iv|v)\b", "", text, flags=re.IGNORECASE)
+            text = re.sub(r"\s+", " ", text).strip(" -_,.")
+            if text:
+                cleaned.append(text)
+    if not cleaned:
+        return ""
+
+    def sort_key(text):
+        tokens = [token for token in re.split(r"\s+", text) if token]
+        honorific = 1 if tokens and tokens[0].casefold() in {"mr", "mrs", "ms", "miss", "dr", "prof", "engr"} else 0
+        return (honorific, len(tokens), text.casefold())
+
+    cleaned = sorted(cleaned, key=sort_key)
+    return cleaned[0]
+
+
 def build_speaker_leaderboard(df):
     if df is None or df.empty or "Speakers" not in df.columns:
         return pd.DataFrame(columns=["Speaker", "Sessions", "Avg Attendance", "Last Session"])
@@ -112,9 +156,9 @@ def build_speaker_leaderboard(df):
     if expanded.empty:
         return pd.DataFrame(columns=["Speaker", "Sessions", "Avg Attendance", "Last Session"])
 
-    expanded["Speaker Key"] = expanded["Speaker"].str.casefold()
+    expanded["Speaker Key"] = expanded["Speaker"].apply(_speaker_match_key)
     grouped = expanded.groupby("Speaker Key", as_index=False).agg(
-        Speaker=("Speaker", "first"),
+        Speaker=("Speaker", _choose_best_speaker_name),
         Sessions=("Event Title", "count"),
         Avg_Attendance=("No. of Attendees", "mean"),
         Last_Session=("Date and Time", "max"),
