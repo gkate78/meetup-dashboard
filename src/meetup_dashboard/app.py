@@ -72,7 +72,13 @@ from .bookings import (
     save_event_bookings,
     update_event_booking_status,
 )
-from .metrics import build_speaker_leaderboard, compute_pulse, safe_metric, split_speaker_names
+from .metrics import (
+    build_speaker_leaderboard,
+    compute_pulse,
+    safe_metric,
+    speaker_identity_key,
+    split_speaker_names,
+)
 
 
 def sanitize_title(title):
@@ -464,6 +470,10 @@ def normalize_speaker_text(value):
 
 def normalize_speaker_column(df):
     if df is not None and not df.empty and "Speakers" in df.columns:
+        # Retain the provider value for auditability; the cleaned column remains
+        # convenient for event display and existing downstream code.
+        if "Speakers Raw" not in df.columns:
+            df["Speakers Raw"] = df["Speakers"]
         df["Speakers"] = df["Speakers"].apply(normalize_speaker_text)
     return df
 
@@ -481,6 +491,34 @@ def _ensure_speaker_overrides_sqlite_schema(path: str) -> None:
                 canonical_speakers TEXT
             )
             """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS speakers (
+                speaker_id TEXT PRIMARY KEY,
+                canonical_name TEXT NOT NULL,
+                created_at TEXT
+            )
+            """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS speaker_aliases (
+                alias_key TEXT PRIMARY KEY,
+                speaker_id TEXT NOT NULL,
+                raw_name TEXT,
+                source TEXT,
+                reviewed_at TEXT,
+                FOREIGN KEY (speaker_id) REFERENCES speakers(speaker_id)
+            )
+            """)
+        speaker_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(speakers)").fetchall()
+        }
+        if "created_at" not in speaker_columns:
+            conn.execute("ALTER TABLE speakers ADD COLUMN created_at TEXT")
+        alias_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(speaker_aliases)").fetchall()
+        }
+        for column in ("raw_name", "source", "reviewed_at"):
+            if column not in alias_columns:
+                conn.execute(f"ALTER TABLE speaker_aliases ADD COLUMN {column} TEXT")
         conn.commit()
 
 
@@ -537,6 +575,41 @@ def load_speaker_overrides(path):
     return dict(zip(clean["event_id"], clean["canonical_speakers"], strict=False))
 
 
+def load_speaker_aliases(path):
+    """Load human-reviewed aliases keyed by their conservative comparison key.
+
+    Alias resolution is intentionally SQLite-only: it relies on a stable
+    speaker ID and canonical record, rather than a loose CSV name mapping.
+    """
+    if not _is_sqlite_path(path):
+        return {}
+    try:
+        _ensure_speaker_overrides_sqlite_schema(path)
+        import sqlite3
+
+        with sqlite3.connect(path) as conn:
+            aliases = pd.read_sql_query(
+                """
+                SELECT a.alias_key, a.speaker_id, s.canonical_name
+                FROM speaker_aliases AS a
+                JOIN speakers AS s ON s.speaker_id = a.speaker_id
+                """,
+                conn,
+            )
+    except Exception as e:
+        logger.warning("Unable to read speaker aliases from SQLite %s: %s", path, e)
+        return {}
+
+    result = {}
+    for row in aliases.itertuples(index=False):
+        alias_key = speaker_identity_key(row.alias_key)
+        speaker_id = str(row.speaker_id).strip()
+        canonical_name = str(row.canonical_name).strip()
+        if alias_key and speaker_id and canonical_name:
+            result[alias_key] = (speaker_id, canonical_name)
+    return result
+
+
 def apply_missing_speaker_overrides(df, overrides):
     if df is None or df.empty or not overrides:
         return df, 0
@@ -556,6 +629,10 @@ def apply_missing_speaker_overrides(df, overrides):
     mapped = out["Event ID"].map(overrides)
     fill_mask = missing_mask & mapped.notna()
     out.loc[fill_mask, "Speakers"] = mapped[fill_mask]
+    if "Speakers Raw" in out.columns:
+        # The override becomes the auditable identity input when Meetup did
+        # not supply a speaker value.
+        out.loc[fill_mask, "Speakers Raw"] = mapped[fill_mask]
     return out, int(fill_mask.sum())
 
 
@@ -1755,6 +1832,7 @@ def main():
     dashboard = get_dashboard_data(URLNAME)
     df_up = dashboard["df_up"]
     df_past = dashboard["df_past"]
+    speaker_aliases = load_speaker_aliases(SPEAKER_OVERRIDES_PATH)
     member_count = dashboard["member_count"]
     pulse_source = dashboard["source"]
     pulse_saved_at = dashboard["saved_at"]
@@ -2552,7 +2630,7 @@ def main():
     if PAGE_VIEW in ("all", "speakers"):
         st.markdown('<div id="speakers"></div>', unsafe_allow_html=True)
         st.subheader("Speaker Leaderboard")
-        speaker_board = build_speaker_leaderboard(df_past)
+        speaker_board = build_speaker_leaderboard(df_past, speaker_aliases)
         if speaker_board.empty:
             st.info("No speaker data available yet.")
         else:

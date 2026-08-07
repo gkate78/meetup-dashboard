@@ -5,8 +5,50 @@ from meetup_dashboard.metrics import (
     build_speaker_leaderboard,
     compute_pulse,
     safe_metric,
+    speaker_identity_key,
     split_speaker_names,
 )
+
+
+def test_speaker_identity_key_removes_honorifics_credentials_and_accents():
+    assert speaker_identity_key("Dr. María Santos, PhD") == "maria santos"
+
+
+def test_speaker_leaderboard_uses_reviewed_aliases_but_does_not_guess_spellings():
+    df = pd.DataFrame(
+        [
+            {"Event Title": "A", "Date and Time": "2025-01-01", "No. of Attendees": 60, "Speakers": "Maria Santos"},
+            {"Event Title": "B", "Date and Time": "2025-02-01", "No. of Attendees": 40, "Speakers": "M. Santos"},
+            {"Event Title": "C", "Date and Time": "2025-03-01", "No. of Attendees": 80, "Speakers": "Maria Santes"},
+        ]
+    )
+    aliases = {
+        "maria santos": ("spk_014", "Maria Santos"),
+        "m santos": ("spk_014", "Maria Santos"),
+    }
+
+    board = build_speaker_leaderboard(df, aliases)
+
+    assert board.loc[board["Speaker"] == "Maria Santos", "Sessions"].iloc[0] == 2
+    assert "Maria Santes" in board["Speaker"].tolist()
+
+
+def test_speaker_leaderboard_uses_raw_speaker_text_when_available():
+    df = pd.DataFrame(
+        [
+            {
+                "Event Title": "A",
+                "Date and Time": "2025-01-01",
+                "No. of Attendees": 60,
+                "Speakers": "Maria Santos",
+                "Speakers Raw": "Dr. María Santos, PhD",
+            }
+        ]
+    )
+
+    board = build_speaker_leaderboard(df, {"maria santos": ("spk_014", "Maria Santos")})
+
+    assert board["Speaker"].tolist() == ["Maria Santos"]
 
 
 def test_safe_metric_mean_handles_nan():

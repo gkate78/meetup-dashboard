@@ -1,4 +1,6 @@
 import re
+import unicodedata
+from collections.abc import Mapping
 
 import pandas as pd
 
@@ -16,6 +18,7 @@ SPEAKER_CREDENTIALS = {
     "phd",
     "pmp",
 }
+SPEAKER_HONORIFICS = {"dr", "engr", "mr", "mrs", "ms", "prof"}
 
 
 def _clean_speaker_name(value):
@@ -25,7 +28,9 @@ def _clean_speaker_name(value):
         text = str(value)
     text = text.replace("<br/>", "\n").replace("<br>", "\n")
     text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"[^A-Za-z0-9Ññ .,'&/-]", " ", text)
+    # Keep Unicode letters in the display value; the identity key later folds
+    # accents only for matching.
+    text = re.sub(r"[^\w .,'&/-]", " ", text, flags=re.UNICODE)
     text = re.sub(r"\s+", " ", text)
     return text.strip(" -_,.")
 
@@ -33,6 +38,23 @@ def _clean_speaker_name(value):
 def _is_credential(value):
     token = str(value).strip(" .").casefold()
     return token in SPEAKER_CREDENTIALS
+
+
+def speaker_identity_key(value):
+    """Return a conservative comparison key for a single speaker name.
+
+    This is deliberately not a fuzzy matcher: initials and differently spelled
+    names remain distinct until an explicitly reviewed alias links them.
+    """
+    name = _clean_speaker_name(value)
+    name = unicodedata.normalize("NFKD", name)
+    name = "".join(char for char in name if not unicodedata.combining(char))
+    tokens = [token.casefold().strip(".") for token in re.findall(r"[A-Za-z0-9]+", name)]
+    while tokens and tokens[0] in SPEAKER_HONORIFICS:
+        tokens.pop(0)
+    while tokens and tokens[-1] in SPEAKER_CREDENTIALS:
+        tokens.pop()
+    return " ".join(tokens)
 
 
 def split_speaker_names(value):
@@ -98,23 +120,39 @@ def clamp(value, lower=0, upper=100):
     return max(lower, min(upper, value))
 
 
-def build_speaker_leaderboard(df):
+def build_speaker_leaderboard(df, speaker_aliases: Mapping[str, tuple[str, str]] | None = None):
     if df is None or df.empty or "Speakers" not in df.columns:
         return pd.DataFrame(columns=["Speaker", "Sessions", "Avg Attendance", "Last Session"])
 
     base = df.copy()
     base["No. of Attendees"] = pd.to_numeric(base.get("No. of Attendees"), errors="coerce")
     base["Date and Time"] = pd.to_datetime(base.get("Date and Time"), errors="coerce")
-    base["Speaker"] = base["Speakers"].apply(split_speaker_names)
+    source_column = "Speakers Raw" if "Speakers Raw" in base.columns else "Speakers"
+    base["Speaker"] = base[source_column].apply(split_speaker_names)
     expanded = base.explode("Speaker")
     expanded["Speaker"] = expanded["Speaker"].fillna("").astype(str).str.strip()
     expanded = expanded[~expanded["Speaker"].str.casefold().isin(INVALID_SPEAKERS)]
     if expanded.empty:
         return pd.DataFrame(columns=["Speaker", "Sessions", "Avg Attendance", "Last Session"])
 
-    expanded["Speaker Key"] = expanded["Speaker"].str.casefold()
+    aliases = speaker_aliases or {}
+
+    def resolve_speaker(name):
+        identity_key = speaker_identity_key(name)
+        match = aliases.get(identity_key)
+        if match:
+            speaker_id, canonical_name = match
+            return str(speaker_id), str(canonical_name)
+        # The normalized key automatically handles harmless formatting changes,
+        # but never tries to guess that two spellings refer to one person.
+        return f"name:{identity_key or str(name).casefold()}", str(name)
+
+    resolved = expanded["Speaker"].apply(resolve_speaker)
+    expanded[["Speaker Key", "Canonical Speaker"]] = pd.DataFrame(
+        resolved.tolist(), index=expanded.index
+    )
     grouped = expanded.groupby("Speaker Key", as_index=False).agg(
-        Speaker=("Speaker", "first"),
+        Speaker=("Canonical Speaker", "first"),
         Sessions=("Event Title", "count"),
         Avg_Attendance=("No. of Attendees", "mean"),
         Last_Session=("Date and Time", "max"),

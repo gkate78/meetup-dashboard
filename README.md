@@ -9,7 +9,7 @@ Streamlit analytics app for Data Engineering Pilipinas Meetup data, powered by M
 - Includes a Booking Calendar page for the full DEP schedule and speaker booking requests, with popup booking form validation and preserved entries on invalid submit.
 - Computes a weighted `Community Pulse Score` for quick health monitoring.
 - Uses resilient data loading with retries and snapshot fallback.
-- Normalizes speaker names, separates co-speakers joined by commas/`and`/`&`, preserves credential suffixes, and excludes missing placeholders (for example: `nan`, `none`, `null`, `-`) from ranking.
+- Preserves raw speaker values for audit, separates co-speakers joined by commas/`and`/`&`, normalizes harmless formatting differences, and excludes missing placeholders (for example: `nan`, `none`, `null`, `-`) from ranking.
 
 ## Tech stack
 - Python 3.11+
@@ -80,7 +80,7 @@ If you want automated snapshot refreshes (recommended to avoid live API hits), a
 The app expects these runtime files to be writable:
 - `SNAPSHOT_PATH` for cached dashboard snapshots when `SNAPSHOT_BACKEND=file`
 - `FEEDBACK_DATA_PATH` for submitted feedback rows (SQLite `.db` recommended; CSV legacy supported)
-- `SPEAKER_OVERRIDES_PATH` for manual speaker normalization overrides
+- `SPEAKER_OVERRIDES_PATH` for missing-speaker event overrides and reviewed speaker aliases
 - `EVENT_BOOKINGS_PATH` for speaker booking requests
 
 SQLite `.db` paths are the current defaults and are created automatically when needed. If you point any of these settings to a CSV file instead, use these CSV-compatible schemas:
@@ -132,6 +132,22 @@ Speaker overrides for missing past speakers:
 - Missing speaker names are rendered as blank in event tables/UI.
 - Leaderboard parsing separates co-speakers while keeping credential suffixes such as `MSDS` with the speaker name.
 
+Speaker identity aliases for accurate leaderboard totals:
+- The same SQLite DB also contains `speakers` and `speaker_aliases` tables. They are created automatically when the app starts.
+- Add a stable `speaker_id` and the preferred `canonical_name` to `speakers`; add every reviewed name variation to `speaker_aliases`.
+- Alias keys are matched after case, accent, punctuation, honorific, and credential normalization. Variants that are not approved aliases are deliberately kept separate—there is no fuzzy auto-merge.
+- The SQLite database is runtime data, so copy or restore it to the persistent `/app/data` volume during deployment. It is intentionally not included in Git.
+
+```sql
+INSERT INTO speakers (speaker_id, canonical_name, created_at)
+VALUES ('spk_014', 'Maria Santos', CURRENT_TIMESTAMP);
+
+INSERT INTO speaker_aliases (alias_key, speaker_id, raw_name, source, reviewed_at)
+VALUES
+  ('Maria Santos', 'spk_014', 'Maria Santos', 'Meetup', CURRENT_TIMESTAMP),
+  ('M. Santos', 'spk_014', 'M. Santos', 'Manual review', CURRENT_TIMESTAMP);
+```
+
 Speaker booking requests:
 - `EVENT_BOOKINGS_PATH` (default `data/event_bookings.db` for SQLite storage; legacy CSV paths are also supported)
 - `DEP_EVENT_DURATION_MINUTES` (default `120`) controls the default existing Meetup event conflict window
@@ -179,7 +195,7 @@ The repository's compose file already uses named volumes for this layout:
 - `EVENT_BOOKINGS_PATH=/app/data/event_bookings.db` -> mounted `event_bookings.db` (SQLite) or `event_bookings.csv`
 - `SNAPSHOT_PATH=/app/cache/meetup_snapshot.db` -> mounted cache path if you want file-based snapshots (SQLite `.db` or legacy `.json` supported)
 
-The speaker override DB is runtime data and is intentionally ignored by Git and Docker build context. Upload or restore `speaker_overrides.db` into the mounted `/app/data` volume before launch; otherwise the app will still run, but missing-speaker overrides will not be applied. Keep `FEEDBACK_FORM_URL` empty if you want only the in-app feedback page. If you reuse this pattern in another project, the deploy only needs the same environment variables and writable data paths.
+The speaker override DB is runtime data and is intentionally ignored by Git and Docker build context. Upload or restore `speaker_overrides.db` into the mounted `/app/data` volume before launch; otherwise the app will still run, but missing-speaker overrides and reviewed speaker aliases will not be applied. Keep `FEEDBACK_FORM_URL` empty if you want only the in-app feedback page. If you reuse this pattern in another project, the deploy only needs the same environment variables and writable data paths.
 
 ### Health checks before go-live
 1. Launch app and verify `Data source: Live API` in the caption.

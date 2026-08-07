@@ -1,6 +1,7 @@
 from meetup_dashboard.app import (
     load_feedback_data,
     load_snapshot,
+    load_speaker_aliases,
     load_speaker_overrides,
     save_feedback_data,
     save_snapshot,
@@ -42,6 +43,25 @@ def test_event_booking_roundtrip(tmp_path):
     assert int(bookings.iloc[0]["duration_minutes"]) == 60
     assert bookings.iloc[0]["speaker_name"] == "Ana Cruz"
     assert bookings.iloc[0]["talk_title"] == "Building Reliable Pipelines"
+
+
+def test_load_speaker_aliases_resolves_to_canonical_identity(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "speaker_overrides.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE speakers (speaker_id TEXT PRIMARY KEY, canonical_name TEXT NOT NULL)"
+        )
+        conn.execute(
+            "CREATE TABLE speaker_aliases (alias_key TEXT PRIMARY KEY, speaker_id TEXT NOT NULL)"
+        )
+        conn.execute("INSERT INTO speakers VALUES (?, ?)", ("spk_014", "Maria Santos"))
+        conn.execute("INSERT INTO speaker_aliases VALUES (?, ?)", ("M. Santos", "spk_014"))
+
+    assert load_speaker_aliases(str(path)) == {
+        "m santos": ("spk_014", "Maria Santos"),
+    }
 
 
 def test_event_booking_roundtrip_sqlite(tmp_path):
