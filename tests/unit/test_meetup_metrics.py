@@ -17,9 +17,24 @@ def test_speaker_identity_key_removes_honorifics_credentials_and_accents():
 def test_speaker_leaderboard_uses_reviewed_aliases_but_does_not_guess_spellings():
     df = pd.DataFrame(
         [
-            {"Event Title": "A", "Date and Time": "2025-01-01", "No. of Attendees": 60, "Speakers": "Maria Santos"},
-            {"Event Title": "B", "Date and Time": "2025-02-01", "No. of Attendees": 40, "Speakers": "M. Santos"},
-            {"Event Title": "C", "Date and Time": "2025-03-01", "No. of Attendees": 80, "Speakers": "Maria Santes"},
+            {
+                "Event Title": "A",
+                "Date and Time": "2025-01-01",
+                "No. of Attendees": 60,
+                "Speakers": "Maria Santos",
+            },
+            {
+                "Event Title": "B",
+                "Date and Time": "2025-02-01",
+                "No. of Attendees": 40,
+                "Speakers": "M. Santos",
+            },
+            {
+                "Event Title": "C",
+                "Date and Time": "2025-03-01",
+                "No. of Attendees": 80,
+                "Speakers": "Maria Santes",
+            },
         ]
     )
     aliases = {

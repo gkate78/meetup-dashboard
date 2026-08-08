@@ -508,9 +508,7 @@ def _ensure_speaker_overrides_sqlite_schema(path: str) -> None:
                 FOREIGN KEY (speaker_id) REFERENCES speakers(speaker_id)
             )
             """)
-        speaker_columns = {
-            row[1] for row in conn.execute("PRAGMA table_info(speakers)").fetchall()
-        }
+        speaker_columns = {row[1] for row in conn.execute("PRAGMA table_info(speakers)").fetchall()}
         if "created_at" not in speaker_columns:
             conn.execute("ALTER TABLE speakers ADD COLUMN created_at TEXT")
         alias_columns = {
@@ -1195,9 +1193,7 @@ def render_calendar_booking_grid(
         '<span><span class="legend-dot legend-event"></span>Event day</span>'
         '<span><span class="legend-dot legend-past"></span>Past event</span>'
         "</div>"
-        '<div class="calendar-table-wrapper">'
-        + calendar_html
-        + "</div></div>"
+        '<div class="calendar-table-wrapper">' + calendar_html + "</div></div>"
     )
     st.markdown(calendar_layout_html, unsafe_allow_html=True)
 
