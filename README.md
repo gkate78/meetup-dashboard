@@ -221,6 +221,17 @@ mypy
 pytest -q
 ```
 
+## Production recovery
+The production-readiness roadmap is in [docs/production_readiness.md](docs/production_readiness.md). Create a verified backup locally with:
+
+```bash
+python backup_runtime_data.py create
+```
+
+For an off-site production copy, set `BACKUP_S3_BUCKET`, AWS credentials with write-only access to that prefix, and optionally `BACKUP_S3_PREFIX`; the command uploads the archive over S3 with server-side encryption enabled. Schedule the same command daily from the host or a platform job that mounts the production `/app/data` and `/app/cache` volumes.
+
+For production backup storage, restore instructions, and recovery verification, follow [docs/recovery_runbook.md](docs/recovery_runbook.md).
+
 ## Project layout
 ```text
 src/meetup_dashboard/

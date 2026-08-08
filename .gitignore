@@ -32,6 +32,7 @@ data/feedback.csv
 data/speaker_overrides.csv
 data/event_bookings.csv
 data/*.db
+backups/
 RELEASE.md
 notes/
 *.json.bak

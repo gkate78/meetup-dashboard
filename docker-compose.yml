@@ -1,6 +1,7 @@
 services:
   app:
     build: .
+    restart: unless-stopped
     ports:
       - "8501:8501"
     environment:

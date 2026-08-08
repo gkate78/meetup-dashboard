@@ -1185,19 +1185,21 @@ def render_calendar_booking_grid(
         unsafe_allow_html=True,
     )
 
-    st.markdown('<div class="dep-calendar-layout">', unsafe_allow_html=True)
-    st.markdown(
+    # Streamlit renders each markdown call in its own container, so the
+    # wrapper, legend, and table must be emitted together for the scoped CSS
+    # selectors above to apply.
+    calendar_layout_html = (
+        '<div class="dep-calendar-layout">'
         '<div class="calendar-legend">'
         '<span><span class="legend-dot legend-open"></span>Open for booking</span>'
         '<span><span class="legend-dot legend-event"></span>Event day</span>'
         '<span><span class="legend-dot legend-past"></span>Past event</span>'
-        "</div>",
-        unsafe_allow_html=True,
+        "</div>"
+        '<div class="calendar-table-wrapper">'
+        + calendar_html
+        + "</div></div>"
     )
-    st.markdown(
-        '<div class="calendar-table-wrapper">' + calendar_html + "</div>", unsafe_allow_html=True
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown(calendar_layout_html, unsafe_allow_html=True)
 
 
 def format_event_link(title, url):
@@ -1650,12 +1652,15 @@ def render_community_calendar_section(feedback_df, df_up, df_past, narrow_viewpo
     view_mode = st.radio(
         "Calendar view",
         options=["Month Grid", "List"],
-        index=0 if not narrow_viewport else 1,
+        # Booking dates exist only in the grid, so it must remain the default
+        # on narrow screens as well. The grid wrapper supports horizontal
+        # scrolling when space is limited.
+        index=0,
         horizontal=True,
     )
     st.caption(
         "Hover event days for session details. "
-        "Click a green underlined date to request a speaker slot."
+        "Click a green outlined, underlined future date to request a speaker slot."
     )
     if view_mode == "List":
         render_monthly_calendar(
