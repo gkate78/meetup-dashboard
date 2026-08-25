@@ -65,6 +65,8 @@ The app is configured to render in light mode regardless of the device theme.
 You can also use Docker Compose for local development:
 
 ```bash
+cp .env.example .env
+# Set MEETUP_TOKEN and ADMIN_PASSWORD in .env
 docker compose up --build
 ```
 
@@ -73,6 +75,23 @@ speaker overrides and aliases, bookings, and file snapshots in the `/app/data`
 and `/app/cache` volumes. Check `http://localhost:8501/_stcore/health` to verify
 container health. On the Speakers page, use the speaker dropdown below the
 ranking cards to view all events facilitated by the selected speaker.
+
+Compose passes `MEETUP_TOKEN` and `ADMIN_PASSWORD` from `.env` into the
+container. After changing either value, recreate the app so the new environment
+is applied:
+
+```bash
+docker compose up -d --force-recreate app
+```
+
+Keep `data/speaker_overrides.db` backed up and restore it into the mounted
+`/app/data` volume before starting the app; it contains the reviewed speaker
+aliases used to combine duplicate names in the leaderboard and speaker
+dropdown.
+
+For Docker support inside this development container, run **Dev Containers:
+Rebuild Container** after opening the project. The devcontainer provisions a
+Docker daemon, after which `docker compose up --build` can be used locally.
 
 You can override the data cache TTL to reduce API calls during development or testing. Example (24h cache):
 
@@ -129,7 +148,9 @@ Feedback settings:
 - `FEEDBACK_DATA_PATH` (default `data/feedback.db`; legacy `data/feedback.csv` is also supported)
 
 Moderator access:
-- `ADMIN_PASSWORD` (optional) enables the admin dashboard page for booking management
+- `ADMIN_PASSWORD` (optional) enables the admin dashboard page for booking management;
+  set it in `.env` for Docker Compose or in the hosting platform's environment
+  settings, then recreate/redeploy the app after changing it
 
 Speaker overrides for missing past speakers:
 - `SPEAKER_OVERRIDES_PATH` (default `data/speaker_overrides.db`; legacy `data/speaker_overrides.csv` is also supported)
@@ -187,11 +208,12 @@ Use mounted storage for the runtime files and point the app at those paths. A ty
 
 #### Deployment checklist
 1. Set the runtime secret `MEETUP_TOKEN` in Dokploy.
-2. Mount persistent volumes at `/app/data` and `/app/cache`.
-3. Keep the app port set to `8501` (or map Dokploy's `$PORT` to the container's `8501`).
-4. Leave `SNAPSHOT_BACKEND=file` unless you also configure S3 credentials.
-5. Verify `/app/data` contains writable SQLite DBs for feedback, speaker overrides, and bookings.
-6. Confirm the health endpoint `/_stcore/health` responds with `200` after startup.
+2. Set the runtime secret `ADMIN_PASSWORD` in Dokploy to enable the Admin page.
+3. Mount persistent volumes at `/app/data` and `/app/cache`.
+4. Keep the app port set to `8501` (or map Dokploy's `$PORT` to the container's `8501`).
+5. Leave `SNAPSHOT_BACKEND=file` unless you also configure S3 credentials.
+6. Verify `/app/data` contains writable SQLite DBs for feedback, speaker overrides, and bookings.
+7. Confirm the health endpoint `/_stcore/health` responds with `200` after startup.
 
 The repository's compose file already uses named volumes for this layout:
 - `meetup_data` -> `/app/data`

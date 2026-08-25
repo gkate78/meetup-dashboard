@@ -7,6 +7,7 @@ services:
     environment:
       PORT: 8501
       MEETUP_TOKEN: ${MEETUP_TOKEN:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       FEEDBACK_DATA_PATH: /app/data/feedback.db
       SPEAKER_OVERRIDES_PATH: /app/data/speaker_overrides.db
       EVENT_BOOKINGS_PATH: /app/data/event_bookings.db
