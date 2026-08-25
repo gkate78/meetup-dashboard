@@ -15,7 +15,7 @@ format:
 	$(BLACK) .
 
 run:
-	python meetup.py
+	streamlit run meetup.py --server.address 0.0.0.0 --server.port $${PORT:-8501}
 
 compose:
 	$(DOCKER_COMPOSE) up --build

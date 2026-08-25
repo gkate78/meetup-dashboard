@@ -1,5 +1,6 @@
 import pandas as pd
 
+from meetup_dashboard.app import speaker_events
 from meetup_dashboard.metrics import (
     build_sparkline,
     build_speaker_leaderboard,
@@ -64,6 +65,20 @@ def test_speaker_leaderboard_uses_raw_speaker_text_when_available():
     board = build_speaker_leaderboard(df, {"maria santos": ("spk_014", "Maria Santos")})
 
     assert board["Speaker"].tolist() == ["Maria Santos"]
+
+
+def test_speaker_events_returns_all_events_for_selected_speaker():
+    df = pd.DataFrame(
+        [
+            {"Event Title": "Online", "Speakers": "Maria Santos", "Online?": True},
+            {"Event Title": "In person", "Speakers": "Maria Santos", "Online?": False},
+            {"Event Title": "Other", "Speakers": "Another Speaker", "Online?": True},
+        ]
+    )
+
+    events = speaker_events(df, "Maria Santos")
+
+    assert events["Event Title"].tolist() == ["Online", "In person"]
 
 
 def test_safe_metric_mean_handles_nan():

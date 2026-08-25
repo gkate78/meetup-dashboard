@@ -636,13 +636,40 @@ def apply_missing_speaker_overrides(df, overrides):
 
 def render_responsive_table(df, allow_html_columns=None):
     allow_html_columns = set(allow_html_columns or [])
-    safe_df = df.copy()
+    safe_df = df.drop(columns=["Speakers Raw"], errors="ignore").copy()
     for col in safe_df.columns:
         if col in allow_html_columns:
             continue
         safe_df[col] = safe_df[col].apply(lambda v: "" if pd.isna(v) else html.escape(str(v)))
     table_html = safe_df.to_html(index=False, escape=False, classes="dep-table")
     st.markdown(f'<div class="table-wrap">{table_html}</div>', unsafe_allow_html=True)
+
+
+def _speaker_matches_selection(value, selected_speaker, speaker_aliases):
+    selected_key = speaker_identity_key(selected_speaker)
+    aliases = speaker_aliases or {}
+
+    for name in split_speaker_names(value):
+        name_key = speaker_identity_key(name)
+        match = aliases.get(name_key)
+        resolved_key = speaker_identity_key(match[1]) if match else name_key
+        if resolved_key == selected_key:
+            return True
+    return False
+
+
+def speaker_events(df, selected_speaker, speaker_aliases=None):
+    if df is None or df.empty or not selected_speaker:
+        return pd.DataFrame()
+    if "Speakers" not in df.columns:
+        return pd.DataFrame()
+
+    events = df.copy()
+    source_column = "Speakers Raw" if "Speakers Raw" in events.columns else "Speakers"
+    matches = events[source_column].apply(
+        lambda value: _speaker_matches_selection(value, selected_speaker, speaker_aliases)
+    )
+    return events[matches].copy()
 
 
 def render_monthly_calendar(
@@ -2280,7 +2307,7 @@ def main():
                     df_up_display = df_up_display[["Event Title", "Date and Time", "Feedback"]]
                 else:
                     df_up_display = df_up_display.drop(
-                        columns=["Event URL", "Event ID"], errors="ignore"
+                        columns=["Event URL", "Event ID", "Speakers Raw"], errors="ignore"
                     )
                 render_responsive_table(
                     df_up_display, allow_html_columns=["Event Title", "Feedback"]
@@ -2322,7 +2349,7 @@ def main():
                     ]
                 else:
                     df_past_display = df_past_display.drop(
-                        columns=["Event URL", "Event ID"], errors="ignore"
+                        columns=["Event URL", "Event ID", "Speakers Raw"], errors="ignore"
                     )
                 render_responsive_table(
                     df_past_display, allow_html_columns=["Event Title", "Feedback"]
@@ -2650,7 +2677,30 @@ def main():
                         unsafe_allow_html=True,
                     )
             if PAGE_VIEW == "speakers":
-                render_responsive_table(speaker_board)
+                selected_speaker = st.selectbox(
+                    "Select a speaker",
+                    options=speaker_board["Speaker"].tolist(),
+                    key="speaker_event_selector",
+                )
+                selected_events = speaker_events(df_past, selected_speaker, speaker_aliases)
+                st.markdown(f"**Events facilitated by {sanitize_title(selected_speaker)}**")
+                if selected_events.empty:
+                    st.info("No events found for this speaker.")
+                else:
+                    speaker_events_display = selected_events.copy()
+                    speaker_events_display["Date and Time"] = pd.to_datetime(
+                        speaker_events_display["Date and Time"], errors="coerce"
+                    ).dt.strftime("%a, %b %d, %Y %I:%M %p")
+                    speaker_events_display["Event Title"] = speaker_events_display.apply(
+                        lambda row: format_event_link(row["Event Title"], row["Event URL"]),
+                        axis=1,
+                    )
+                    speaker_events_display = speaker_events_display.drop(
+                        columns=["Event URL", "Event ID", "Speakers Raw"], errors="ignore"
+                    )
+                    render_responsive_table(
+                        speaker_events_display, allow_html_columns=["Event Title"]
+                    )
 
     if PAGE_VIEW == "all":
         render_home_event_preview()

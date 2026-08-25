@@ -5,6 +5,7 @@ Streamlit analytics app for Data Engineering Pilipinas Meetup data, powered by M
 ## What this app does
 - Pulls upcoming and past events from Meetup GraphQL.
 - Tracks attendance trends, monthly heatmap, KPI metrics, and speaker leaderboard.
+- Provides a speaker dropdown with event details for each selected facilitator.
 - Includes a community feedback page with runtime feedback storage.
 - Includes a Booking Calendar page for the full DEP schedule and speaker booking requests, with popup booking form validation and preserved entries on invalid submit.
 - Computes a weighted `Community Pulse Score` for quick health monitoring.
@@ -66,6 +67,12 @@ You can also use Docker Compose for local development:
 ```bash
 docker compose up --build
 ```
+
+The container serves Streamlit on port `8501` by default. It persists feedback,
+speaker overrides and aliases, bookings, and file snapshots in the `/app/data`
+and `/app/cache` volumes. Check `http://localhost:8501/_stcore/health` to verify
+container health. On the Speakers page, use the speaker dropdown below the
+ranking cards to view all events facilitated by the selected speaker.
 
 You can override the data cache TTL to reduce API calls during development or testing. Example (24h cache):
 
@@ -138,6 +145,8 @@ Speaker identity aliases for accurate leaderboard totals:
 - Alias keys are matched after case, accent, punctuation, honorific, and credential normalization. Variants that are not approved aliases are deliberately kept separate—there is no fuzzy auto-merge.
 - The SQLite database is runtime data, so copy or restore it to the persistent `/app/data` volume during deployment. It is intentionally not included in Git.
 
+To complete this in a deployment, make sure the runtime DB at `SPEAKER_OVERRIDES_PATH` (or the default `/app/data/speaker_overrides.db`) is persisted and then populate it with canonical speaker records and approved aliases. The app will create the tables automatically on first run and use the aliases for leaderboard grouping after a restart.
+
 ```sql
 INSERT INTO speakers (speaker_id, canonical_name, created_at)
 VALUES ('spk_014', 'Maria Santos', CURRENT_TIMESTAMP);
@@ -147,6 +156,8 @@ VALUES
   ('Maria Santos', 'spk_014', 'Maria Santos', 'Meetup', CURRENT_TIMESTAMP),
   ('M. Santos', 'spk_014', 'M. Santos', 'Manual review', CURRENT_TIMESTAMP);
 ```
+
+If you prefer a one-off local setup, you can load the same SQL with `sqlite3` against the runtime DB file before launching the app.
 
 Speaker booking requests:
 - `EVENT_BOOKINGS_PATH` (default `data/event_bookings.db` for SQLite storage; legacy CSV paths are also supported)
