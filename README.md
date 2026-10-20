@@ -166,6 +166,8 @@ Speaker identity aliases for accurate leaderboard totals:
 - Alias keys are matched after case, accent, punctuation, honorific, and credential normalization. Variants that are not approved aliases are deliberately kept separate—there is no fuzzy auto-merge.
 - The SQLite database is runtime data, so keep it on persistent storage at the path set by `SPEAKER_OVERRIDES_PATH` (see [Dokploy](#dokploy) for the production layout). It is intentionally not included in Git.
 
+Reviewed aliases are also committed in [`src/meetup_dashboard/speaker_aliases.csv`](src/meetup_dashboard/speaker_aliases.csv) (`speaker_id,canonical_name,alias`). The app always loads this file, so deployments without a persistent DB (such as Streamlit Community Cloud) still combine known name variants. Aliases in the runtime DB take precedence when both define the same name. Add new reviewed aliases to both the CSV and the production DB.
+
 To complete this in a deployment, make sure the runtime DB at `SPEAKER_OVERRIDES_PATH` is persisted and then populate it with canonical speaker records and approved aliases. The app creates the tables automatically and reads aliases on every page load, so new aliases appear after a browser refresh.
 
 ```sql
