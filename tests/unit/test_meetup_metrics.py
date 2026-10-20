@@ -1,6 +1,6 @@
 import pandas as pd
 
-from meetup_dashboard.app import speaker_events
+from meetup_dashboard.app import format_yes_no, speaker_events
 from meetup_dashboard.metrics import (
     build_sparkline,
     build_speaker_leaderboard,
@@ -225,3 +225,9 @@ def test_compute_pulse_structure_and_bounds():
         "sparkline",
     }
     assert 0 <= pulse["score"] <= 100
+
+
+def test_format_yes_no_handles_bools_and_snapshot_strings():
+    series = pd.Series([True, False, "True", "false", None])
+    assert series.apply(format_yes_no).tolist()[:4] == ["Yes", "No", "Yes", "No"]
+    assert format_yes_no(None) is None
