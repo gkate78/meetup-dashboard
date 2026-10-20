@@ -645,6 +645,15 @@ def render_responsive_table(df, allow_html_columns=None):
     st.markdown(f'<div class="table-wrap">{table_html}</div>', unsafe_allow_html=True)
 
 
+def format_yes_no(value):
+    # Snapshot CSVs round-trip booleans as "True"/"False" strings.
+    if isinstance(value, str):
+        value = {"true": True, "false": False}.get(value.strip().lower(), value)
+    if isinstance(value, bool) or type(value).__name__ == "bool_":
+        return "Yes" if value else "No"
+    return value
+
+
 def _speaker_matches_selection(value, selected_speaker, speaker_aliases):
     selected_key = speaker_identity_key(selected_speaker)
     aliases = speaker_aliases or {}
@@ -2695,6 +2704,10 @@ def main():
                         lambda row: format_event_link(row["Event Title"], row["Event URL"]),
                         axis=1,
                     )
+                    if "Online?" in speaker_events_display.columns:
+                        speaker_events_display["Online?"] = speaker_events_display["Online?"].apply(
+                            format_yes_no
+                        )
                     speaker_events_display = speaker_events_display.drop(
                         columns=["Event URL", "Event ID", "Speakers Raw"], errors="ignore"
                     )
