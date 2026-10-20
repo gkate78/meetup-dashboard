@@ -62,7 +62,9 @@ Use these when a question calls for a specific kind of story.
 
 **Key decision:** **No fuzzy auto-merging.** Two different people can have similar names, and a wrong merge silently corrupts someone's record. Only variations a person has reviewed are merged, and everything else stays separate.
 
-**Takeaway:** For identity data, a small manual review step is worth more than a clever matching algorithm. Being correct matters more than being automatic.
+**What I tried first:** An earlier version (Aug 2026, archived as the tag `archive/speaker-normalization`) matched speakers automatically by **last name**, ignoring honorifics. It fixed the obvious cases, such as "Kristine Joy Cristobal" vs "Kristine Cristobal" and "Mr Sunga" vs "Macky Sunga". When I compared it side by side with the alias approach, though, it also merged **different people who share a surname**: "Maria Santos" and "Jose Santos" became one speaker with both people's sessions. I dropped it before merging and used reviewed aliases instead, which handle all the real variants without false merges.
+
+**Takeaway:** For identity data, a small manual review step is worth more than a clever matching algorithm. Being correct matters more than being automatic. Test a matching rule against cases that *should not* match, not only the ones that should.
 
 **TODO (Kata):** how many duplicates or variants did this fix? Did any speaker's rank change noticeably?
 
