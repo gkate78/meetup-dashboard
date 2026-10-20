@@ -164,9 +164,9 @@ Speaker identity aliases for accurate leaderboard totals:
 - The same SQLite DB also contains `speakers` and `speaker_aliases` tables. They are created automatically when the app starts.
 - Add a stable `speaker_id` and the preferred `canonical_name` to `speakers`; add every reviewed name variation to `speaker_aliases`.
 - Alias keys are matched after case, accent, punctuation, honorific, and credential normalization. Variants that are not approved aliases are deliberately kept separate—there is no fuzzy auto-merge.
-- The SQLite database is runtime data, so copy or restore it to the persistent `/app/data` volume during deployment. It is intentionally not included in Git.
+- The SQLite database is runtime data, so keep it on persistent storage at the path set by `SPEAKER_OVERRIDES_PATH` (see [Dokploy](#dokploy) for the production layout). It is intentionally not included in Git.
 
-To complete this in a deployment, make sure the runtime DB at `SPEAKER_OVERRIDES_PATH` (or the default `/app/data/speaker_overrides.db`) is persisted and then populate it with canonical speaker records and approved aliases. The app will create the tables automatically on first run and use the aliases for leaderboard grouping after a restart.
+To complete this in a deployment, make sure the runtime DB at `SPEAKER_OVERRIDES_PATH` is persisted and then populate it with canonical speaker records and approved aliases. The app creates the tables automatically and reads aliases on every page load, so new aliases appear after a browser refresh.
 
 ```sql
 INSERT INTO speakers (speaker_id, canonical_name, created_at)
@@ -204,31 +204,39 @@ Speaker booking requests:
 4. (Optional) Add env vars for S3 snapshot backend.
 
 ### Dokploy
-Use mounted storage for the runtime files and point the app at those paths. A typical Dokploy setup mounts persistent storage at `/app/data` and, if using file snapshots, `/app/cache`.
+Production runs on Dokploy with each SQLite database **bind-mounted as a single file** from the host. Host and container paths are identical:
+
+| Environment variable | Host path = container path |
+|---|---|
+| `FEEDBACK_DATA_PATH` | `/data/sqlite/meetup/feedback.db` |
+| `SPEAKER_OVERRIDES_PATH` | `/data/sqlite/meetup/speaker_overrides.db` |
+| `EVENT_BOOKINGS_PATH` | `/data/sqlite/meetup/event_bookings.db` |
+| `SNAPSHOT_PATH` | `/data/sqlite/meetup/meetup_snapshot.db` |
+
+Each variable must match its mount path exactly. A path that isn't mounted still works, but the file lives inside the container and is lost on the next deploy. The `/app/data` and `/app/cache` paths are only used by the local `docker-compose.yml`; they don't exist in production.
 
 #### Deployment checklist
-1. Set the runtime secret `MEETUP_TOKEN` in Dokploy.
-2. Set the runtime secret `ADMIN_PASSWORD` in Dokploy to enable the Admin page.
-3. Mount persistent volumes at `/app/data` and `/app/cache`.
+1. Provider: GitHub, repository `gkate78/meetup-dashboard`, branch `main`, build path `/`.
+2. Set the runtime secrets `MEETUP_TOKEN` and `ADMIN_PASSWORD` (the latter enables the Admin page).
+3. Add the four BIND mounts and environment variables from the table above. The host files must exist before the first deploy; otherwise Docker creates a directory in their place.
 4. Keep the app port set to `8501` (or map Dokploy's `$PORT` to the container's `8501`).
 5. Leave `SNAPSHOT_BACKEND=file` unless you also configure S3 credentials.
-6. Verify `/app/data` contains writable SQLite DBs for feedback, speaker overrides, and bookings.
+6. Use **Deploy** to ship new code. **Rebuild** reuses the previously cloned source and does not pull `main`. A real deploy's build log shows a `Cloning Repo github.com/gkate78/meetup-dashboard.git` line and `COPY . .` not marked `CACHED`.
 7. Confirm the health endpoint `/_stcore/health` responds with `200` after startup.
 
-The repository's compose file already uses named volumes for this layout:
-- `meetup_data` -> `/app/data`
-- `meetup_cache` -> `/app/cache`
+To check the mounts from the container terminal:
+
+```sh
+env | grep _PATH
+ls -la --time-style=long-iso /data/sqlite/meetup/
+```
 
 - The container listens on `$PORT` when Dokploy provides it, and falls back to `8501`.
 - If you configure the proxy manually, route traffic to the same internal port (`8501` by default).
 - Health endpoint: `/_stcore/health` should return `ok` once Streamlit is ready.
 - If Dokploy shows Bad Gateway, first verify the app is running, the proxy target matches `$PORT`/`8501`, and the container logs include `Uvicorn server started on 0.0.0.0:<port>`.
-- `FEEDBACK_DATA_PATH=/app/data/feedback.db` -> mounted `feedback.db` (SQLite) or `feedback.csv`
-- `SPEAKER_OVERRIDES_PATH=/app/data/speaker_overrides.db` -> mounted `speaker_overrides.db` (SQLite) or `speaker_overrides.csv`
-- `EVENT_BOOKINGS_PATH=/app/data/event_bookings.db` -> mounted `event_bookings.db` (SQLite) or `event_bookings.csv`
-- `SNAPSHOT_PATH=/app/cache/meetup_snapshot.db` -> mounted cache path if you want file-based snapshots (SQLite `.db` or legacy `.json` supported)
 
-The speaker override DB is runtime data and is intentionally ignored by Git and Docker build context. Upload or restore `speaker_overrides.db` into the mounted `/app/data` volume before launch; otherwise the app will still run, but missing-speaker overrides and reviewed speaker aliases will not be applied. Keep `FEEDBACK_FORM_URL` empty if you want only the in-app feedback page. If you reuse this pattern in another project, the deploy only needs the same environment variables and writable data paths.
+The runtime databases are intentionally ignored by Git and the Docker build context. If `speaker_overrides.db` is missing, the app still runs, but missing-speaker overrides and reviewed speaker aliases are not applied. Keep `FEEDBACK_FORM_URL` empty if you want only the in-app feedback page.
 
 ### Health checks before go-live
 1. Launch app and verify `Data source: Live API` in the caption.
@@ -261,7 +269,7 @@ The production-readiness roadmap is in [docs/production_readiness.md](docs/produ
 python backup_runtime_data.py create
 ```
 
-For an off-site production copy, set `BACKUP_S3_BUCKET`, AWS credentials with write-only access to that prefix, and optionally `BACKUP_S3_PREFIX`; the command uploads the archive over S3 with server-side encryption enabled. Schedule the same command daily from the host or a platform job that mounts the production `/app/data` and `/app/cache` volumes.
+For an off-site production copy, set `BACKUP_S3_BUCKET`, AWS credentials with write-only access to that prefix, and optionally `BACKUP_S3_PREFIX`; the command uploads the archive over S3 with server-side encryption enabled. Schedule the same command daily from an environment that has the production database paths mounted (see [Dokploy](#dokploy)).
 
 For production backup storage, restore instructions, and recovery verification, follow [docs/recovery_runbook.md](docs/recovery_runbook.md).
 
