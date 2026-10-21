@@ -466,3 +466,55 @@ def test_event_booking_status_update_persists_sqlite(tmp_path):
     reloaded = load_event_bookings(str(path))
 
     assert reloaded.loc[0, "status"] == "Approved"
+
+
+def test_event_booking_status_update_records_who_and_when(tmp_path):
+    path = tmp_path / "event_bookings.db"
+    save_event_booking(
+        str(path),
+        {
+            "requested_datetime": "2026-05-21T12:00:00Z",
+            "speaker_name": "Ana Cruz",
+            "email": "ana@example.com",
+            "talk_title": "Building Reliable Pipelines",
+        },
+    )
+    bookings = load_event_bookings(str(path))
+    assert bookings.loc[0, "updated_by"] == ""
+    assert bookings.loc[0, "updated_at"] == ""
+
+    updated, changed = update_event_booking_status(
+        bookings, 0, "Confirmed", updated_by="mod@example.com"
+    )
+    assert changed is True
+    save_event_bookings(str(path), updated)
+    reloaded = load_event_bookings(str(path))
+
+    assert reloaded.loc[0, "updated_by"] == "mod@example.com"
+    assert reloaded.loc[0, "updated_at"].endswith("Z")
+
+
+def test_legacy_sqlite_schema_without_audit_columns_loads_and_saves(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "event_bookings.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE event_bookings (requested_datetime TEXT, duration_minutes INTEGER, "
+            "speaker_name TEXT, email TEXT, talk_title TEXT, talk_summary TEXT, "
+            "preferred_format TEXT, availability_notes TEXT, status TEXT, submitted_at TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO event_bookings VALUES ('2026-05-21T12:00:00Z', 60, 'Ana Cruz', "
+            "'ana@example.com', 'Talk', '', 'Online', '', 'Requested', '2026-05-20T00:00:00Z')"
+        )
+
+    bookings = load_event_bookings(str(path))
+    assert bookings.loc[0, "updated_by"] == ""
+
+    updated, _ = update_event_booking_status(bookings, 0, "Approved", updated_by="shared password")
+    save_event_bookings(str(path), updated)
+
+    reloaded = load_event_bookings(str(path))
+    assert reloaded.loc[0, "status"] == "Approved"
+    assert reloaded.loc[0, "updated_by"] == "shared password"

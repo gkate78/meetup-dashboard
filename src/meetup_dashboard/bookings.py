@@ -32,6 +32,8 @@ BOOKING_COLUMNS = [
     "availability_notes",
     "status",
     "submitted_at",
+    "updated_by",
+    "updated_at",
 ]
 
 DEFAULT_BOOKING_DURATION = 60
@@ -77,7 +79,9 @@ def _ensure_sqlite_schema(path: str) -> None:
                 preferred_format TEXT,
                 availability_notes TEXT,
                 status TEXT,
-                submitted_at TEXT
+                submitted_at TEXT,
+                updated_by TEXT,
+                updated_at TEXT
             )
             """)
         conn.commit()
@@ -91,8 +95,9 @@ def _normalize_booking_frame(bookings: pd.DataFrame) -> pd.DataFrame:
         if col not in out.columns:
             out[col] = ""
     out = out[BOOKING_COLUMNS]
-    for col in ("requested_datetime", "submitted_at"):
+    for col in ("requested_datetime", "submitted_at", "updated_at"):
         out[col] = out[col].apply(_format_utc_storage)
+    out["updated_by"] = out["updated_by"].fillna("").astype(str)
     out["duration_minutes"] = pd.to_numeric(out["duration_minutes"], errors="coerce").fillna(
         DEFAULT_BOOKING_DURATION
     )
@@ -347,7 +352,7 @@ def format_event_conflict_message(row: pd.Series) -> str:
 
 
 def update_event_booking_status(
-    bookings: pd.DataFrame, index: int, status: str
+    bookings: pd.DataFrame, index: int, status: str, updated_by: str = ""
 ) -> tuple[pd.DataFrame, bool]:
     if bookings is None or bookings.empty or index not in bookings.index:
         return bookings, False
@@ -356,4 +361,6 @@ def update_event_booking_status(
     if current == status:
         return updated, False
     updated.loc[index, "status"] = status
+    updated.loc[index, "updated_by"] = updated_by
+    updated.loc[index, "updated_at"] = _format_utc_storage(datetime.now(UTC))
     return updated, True

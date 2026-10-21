@@ -25,7 +25,9 @@
    - `MEETUP_TOKEN`
    - `SNAPSHOT_S3_BUCKET` (if using S3)
    - Any AWS credentials (if using S3)
-   - `ADMIN_PASSWORD` (if enabling moderator access)
+   - `MODERATOR_EMAILS` and an `[auth]` section (Google sign-in for moderators; see
+     `.streamlit/secrets.toml.example`)
+   - `ADMIN_PASSWORD` (legacy moderator password, only if sign-in is not configured)
 
 Do NOT paste a `.env` file or `secrets.toml` content directly.
 
