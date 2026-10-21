@@ -76,8 +76,8 @@ and `/app/cache` volumes. Check `http://localhost:8501/_stcore/health` to verify
 container health. On the Speakers page, use the speaker dropdown below the
 ranking cards to view all events facilitated by the selected speaker.
 
-Compose passes `MEETUP_TOKEN` and `ADMIN_PASSWORD` from `.env` into the
-container. After changing either value, recreate the app so the new environment
+Compose passes `MEETUP_TOKEN`, `MODERATOR_EMAILS`, and `ADMIN_PASSWORD` from `.env` into the
+container. After changing any of them, recreate the app so the new environment
 is applied:
 
 ```bash
@@ -148,9 +148,29 @@ Feedback settings:
 - `FEEDBACK_DATA_PATH` (default `data/feedback.db`; legacy `data/feedback.csv` is also supported)
 
 Moderator access:
-- `ADMIN_PASSWORD` (optional) enables the admin dashboard page for booking management;
-  set it in `.env` for Docker Compose or in the hosting platform's environment
-  settings, then recreate/redeploy the app after changing it
+- **Google sign-in (recommended).** Add an `[auth]` section to `.streamlit/secrets.toml`
+  (copy [`.streamlit/secrets.toml.example`](.streamlit/secrets.toml.example)) and set
+  `MODERATOR_EMAILS` to a comma-separated list of organizer emails. Only signed-in
+  accounts on that list with a verified email can open the Admin page. Each booking
+  status change records the moderator's email in `updated_by` and the time in `updated_at`.
+  When both are configured, `ADMIN_PASSWORD` is ignored.
+- **Shared password (legacy fallback).** `ADMIN_PASSWORD` enables the Admin page when
+  sign-in is not configured. Status changes are recorded as `shared password`. After five
+  failed attempts a browser session must wait five minutes; this slows guessing but
+  does not stop someone who opens new sessions, so prefer Google sign-in.
+- Set these in `.env` for Docker Compose or in the hosting platform's environment
+  settings, then recreate/redeploy the app after changing them.
+
+To create the Google OAuth client (free, no billing account needed):
+1. In [Google Cloud Console](https://console.cloud.google.com/), create a project, then
+   **Google Auth Platform → Branding**: set the app name and support email; audience
+   **External**; then publish the app. Leaving it in *Testing* limits sign-in to
+   listed test users.
+2. **Clients → Create client → Web application.** Add the authorized redirect URI
+   `https://<your-host>/oauth2callback` (and `http://localhost:8501/oauth2callback`
+   for local testing).
+3. Copy the client ID and secret into `secrets.toml`, and generate `cookie_secret`
+   with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
 
 Speaker overrides for missing past speakers:
 - `SPEAKER_OVERRIDES_PATH` (default `data/speaker_overrides.db`; legacy `data/speaker_overrides.csv` is also supported)
@@ -217,7 +237,7 @@ Each variable must match its mount path exactly. A path that isn't mounted still
 
 #### Deployment checklist
 1. Provider: GitHub, repository `gkate78/meetup-dashboard`, branch `main`, build path `/`.
-2. Set the runtime secrets `MEETUP_TOKEN` and `ADMIN_PASSWORD` (the latter enables the Admin page).
+2. Set the runtime secrets `MEETUP_TOKEN` and `MODERATOR_EMAILS`. For Google sign-in, add a **File Mount** with the contents of your `secrets.toml` at `/app/.streamlit/secrets.toml` (Streamlit reads `[auth]` only from that file, not from environment variables). Until sign-in is configured, `ADMIN_PASSWORD` keeps the Admin page available.
 3. Add the four BIND mounts and environment variables from the table above. The host files must exist before the first deploy; otherwise Docker creates a directory in their place.
 4. Keep the app port set to `8501` (or map Dokploy's `$PORT` to the container's `8501`).
 5. Leave `SNAPSHOT_BACKEND=file` unless you also configure S3 credentials.

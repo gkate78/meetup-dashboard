@@ -79,6 +79,12 @@ from .metrics import (
     speaker_identity_key,
     split_speaker_names,
 )
+from .moderators import (
+    moderator_email,
+    parse_moderator_emails,
+    password_lockout_remaining,
+    passwords_match,
+)
 
 
 def sanitize_title(title):
@@ -148,32 +154,94 @@ def safe_rerun() -> None:
         raise RuntimeError("Streamlit rerun is unavailable")
 
 
+def _oidc_configured() -> bool:
+    try:
+        return "auth" in st.secrets
+    except StreamlitSecretNotFoundError:
+        return False
+
+
+def moderator_auth_mode() -> str:
+    """Return "oidc", "password", or "disabled".
+
+    Identity sign-in replaces the shared password whenever it is configured.
+    """
+    if MODERATOR_EMAILS and _oidc_configured():
+        return "oidc"
+    if ADMIN_PASSWORD:
+        return "password"
+    return "disabled"
+
+
+def current_moderator() -> str | None:
+    """Return who is acting as moderator, or None when nobody is signed in."""
+    mode = moderator_auth_mode()
+    if mode == "oidc":
+        return moderator_email(st.user.to_dict(), MODERATOR_EMAILS)
+    if mode == "password" and st.session_state.get("is_moderator", False):
+        return "shared password"
+    return None
+
+
 def is_moderator_authenticated() -> bool:
-    return bool(st.session_state.get("is_moderator", False))
+    return current_moderator() is not None
+
+
+def _render_oidc_moderator_access():
+    if not st.user.is_logged_in:
+        if st.button("Sign in with Google", key="admin_oidc_sign_in"):
+            st.login()
+        return
+    if current_moderator():
+        st.success(f"Signed in as {st.user.get('email', '')}")
+    else:
+        st.error("This account is not authorized for moderator access.")
+    if st.button("Sign out", key="admin_oidc_sign_out"):
+        st.logout()
+
+
+def _render_password_moderator_access():
+    if st.session_state.get("is_moderator", False):
+        st.success("Moderator signed in")
+        if st.button("Sign out", key="admin_sign_out"):
+            st.session_state.pop("is_moderator", None)
+            safe_rerun()
+        return
+    password = st.text_input(
+        "Moderator password",
+        type="password",
+        key="admin_password_input",
+    )
+    if not st.button("Sign in", key="admin_sign_in"):
+        return
+    failures = int(st.session_state.get("admin_password_failures", 0))
+    wait = password_lockout_remaining(
+        failures, st.session_state.get("admin_password_failed_at"), time_module.time()
+    )
+    if wait > 0:
+        st.error(f"Too many failed attempts. Try again in {int(wait) + 1} seconds.")
+        return
+    if passwords_match(password, ADMIN_PASSWORD):
+        st.session_state.pop("admin_password_failures", None)
+        st.session_state.pop("admin_password_failed_at", None)
+        st.session_state["is_moderator"] = True
+        safe_rerun()
+    else:
+        st.session_state["admin_password_failures"] = failures + 1
+        st.session_state["admin_password_failed_at"] = time_module.time()
+        logger.warning("Failed moderator password attempt")
+        st.error("Invalid moderator password")
 
 
 def render_moderator_sidebar():
     with st.sidebar.expander("Moderator access", expanded=True):
-        if ADMIN_PASSWORD:
-            if st.session_state.get("is_moderator", False):
-                st.success("Moderator signed in")
-                if st.button("Sign out", key="admin_sign_out"):
-                    st.session_state.pop("is_moderator", None)
-                    safe_rerun()
-            else:
-                password = st.text_input(
-                    "Moderator password",
-                    type="password",
-                    key="admin_password_input",
-                )
-                if st.button("Sign in", key="admin_sign_in"):
-                    if password.strip() == ADMIN_PASSWORD:
-                        st.session_state["is_moderator"] = True
-                        safe_rerun()
-                    else:
-                        st.error("Invalid moderator password")
+        mode = moderator_auth_mode()
+        if mode == "oidc":
+            _render_oidc_moderator_access()
+        elif mode == "password":
+            _render_password_moderator_access()
         else:
-            st.info("ADMIN_PASSWORD not configured. Admin console is disabled.")
+            st.info("Moderator access is not configured. Admin console is disabled.")
 
 
 # -------------------
@@ -228,6 +296,14 @@ if not ADMIN_PASSWORD:
         ADMIN_PASSWORD = st.secrets["ADMIN_PASSWORD"].strip()
     except (StreamlitSecretNotFoundError, KeyError):
         ADMIN_PASSWORD = ""
+
+_moderator_emails_raw = os.getenv("MODERATOR_EMAILS", "").strip()
+if not _moderator_emails_raw:
+    try:
+        _moderator_emails_raw = st.secrets["MODERATOR_EMAILS"]
+    except (StreamlitSecretNotFoundError, KeyError):
+        _moderator_emails_raw = ""
+MODERATOR_EMAILS = parse_moderator_emails(_moderator_emails_raw)
 
 # -------------------
 # GraphQL Queries
@@ -1756,6 +1832,7 @@ def render_admin_booking_page(bookings_df):
     status_options = ["Requested", "Approved", "Confirmed", "Cancelled", "Tentative"]
     status_lookup = {status.casefold(): status for status in status_options}
 
+    actor = current_moderator() or ""
     all_bookings = bookings_df.copy()
     status_filter = st.selectbox(
         "Filter by status",
@@ -1790,6 +1867,10 @@ def render_admin_booking_page(bookings_df):
             if current_status.casefold() not in status_lookup:
                 row_status_options = [current_status] + status_options
                 current_status_label = current_status
+            updated_by = str(booking.get("updated_by", "") or "").strip()
+            last_change = (
+                f"{booking.get('updated_at', '')} by {updated_by}" if updated_by else "None"
+            )
             expander_label = f"{speaker_name} — {talk_title} [{current_status}]"
             with st.expander(expander_label, expanded=False):
                 st.write(
@@ -1798,6 +1879,7 @@ def render_admin_booking_page(bookings_df):
                     f"**Duration:** {duration} minutes  \n"
                     f"**Format:** {booking.get('preferred_format', '')}  \n"
                     f"**Submitted:** {submitted_at}  \n"
+                    f"**Last status change:** {last_change}  \n"
                     f"**Notes:** {booking.get('availability_notes', '') or 'None'}  \n"
                     f"**Talk summary:** {booking.get('talk_summary', '') or 'None'}"
                 )
@@ -1809,7 +1891,7 @@ def render_admin_booking_page(bookings_df):
                     key=status_key,
                 )
                 all_bookings, row_changed = update_event_booking_status(
-                    all_bookings, index, selected_status
+                    all_bookings, index, selected_status, updated_by=actor
                 )
                 changed = changed or row_changed
 
@@ -2486,7 +2568,7 @@ def main():
         if not is_moderator_authenticated():
             st.warning(
                 "Moderator access is required to view this page. "
-                "Use the sidebar to sign in with the configured moderator password."
+                "Use the Moderator access panel in the sidebar to sign in."
             )
         else:
             bookings_df = load_event_bookings(EVENT_BOOKINGS_PATH)
