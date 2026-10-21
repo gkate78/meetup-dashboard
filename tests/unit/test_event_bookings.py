@@ -1,5 +1,6 @@
 from meetup_dashboard.app import (
     load_feedback_data,
+    load_seed_speaker_aliases,
     load_snapshot,
     load_speaker_aliases,
     load_speaker_overrides,
@@ -61,6 +62,63 @@ def test_load_speaker_aliases_resolves_to_canonical_identity(tmp_path):
 
     assert load_speaker_aliases(str(path)) == {
         "m santos": ("spk_014", "Maria Santos"),
+    }
+
+
+def test_load_seed_speaker_aliases_reads_committed_csv(tmp_path):
+    path = tmp_path / "speaker_aliases.csv"
+    path.write_text(
+        "speaker_id,canonical_name,alias\n" 'spk_014,Maria Santos,"Dr. M. Santos, PhD"\n',
+        encoding="utf-8",
+    )
+
+    assert load_seed_speaker_aliases(str(path)) == {
+        "m santos": ("spk_014", "Maria Santos"),
+    }
+
+
+def test_load_seed_speaker_aliases_missing_file_returns_empty(tmp_path):
+    assert load_seed_speaker_aliases(str(tmp_path / "missing.csv")) == {}
+
+
+def test_repo_seed_aliases_merge_known_variants_only():
+    import pandas as pd
+
+    from meetup_dashboard.metrics import build_speaker_leaderboard
+
+    aliases = load_seed_speaker_aliases()
+    speakers = [
+        "Kristine Joy Cristobal",
+        "Kristine Cristobal",
+        "Johannes Paulus JP Acuña",
+        "Johannes Paulus Acuña",
+        "Engr. Bob Mathew D. Sunga, MSDS",
+        "Macky Sunga",
+        "Maria Santos",
+        "Jose Santos",
+    ]
+    df = pd.DataFrame(
+        [
+            {
+                "Event Title": f"E{i}",
+                "Date and Time": "2025-01-01",
+                "No. of Attendees": 50,
+                "Speakers": name,
+            }
+            for i, name in enumerate(speakers)
+        ]
+    )
+
+    sessions = dict(
+        build_speaker_leaderboard(df, aliases)[["Speaker", "Sessions"]].itertuples(index=False)
+    )
+
+    assert sessions == {
+        "Kristine Cristobal": 2,
+        "Johannes Paulus Acuña": 2,
+        "Macky Sunga": 2,
+        "Maria Santos": 1,
+        "Jose Santos": 1,
     }
 
 

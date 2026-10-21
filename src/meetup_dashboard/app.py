@@ -185,6 +185,7 @@ URLNAME = "data-engineering-pilipinas"
 SPEAKER_OVERRIDES_PATH = _resolve_data_path(
     os.getenv("SPEAKER_OVERRIDES_PATH", "data/speaker_overrides.db")
 )
+SPEAKER_ALIASES_SEED_PATH = os.path.join(os.path.dirname(__file__), "speaker_aliases.csv")
 SNAPSHOT_PATH = _resolve_data_path(os.getenv("SNAPSHOT_PATH", "cache/meetup_snapshot.db"))
 SNAPSHOT_BACKEND = os.getenv("SNAPSHOT_BACKEND", "file").strip().lower()
 SNAPSHOT_S3_BUCKET = os.getenv("SNAPSHOT_S3_BUCKET", "").strip()
@@ -601,6 +602,28 @@ def load_speaker_aliases(path):
     result = {}
     for row in aliases.itertuples(index=False):
         alias_key = speaker_identity_key(row.alias_key)
+        speaker_id = str(row.speaker_id).strip()
+        canonical_name = str(row.canonical_name).strip()
+        if alias_key and speaker_id and canonical_name:
+            result[alias_key] = (speaker_id, canonical_name)
+    return result
+
+
+def load_seed_speaker_aliases(path=SPEAKER_ALIASES_SEED_PATH):
+    """Load reviewed aliases committed to the repo.
+
+    These cover deployments without a persistent SQLite DB (for example
+    Streamlit Community Cloud). Aliases in the runtime DB take precedence.
+    """
+    try:
+        seed = pd.read_csv(path, dtype=str, keep_default_na=False)
+    except (OSError, pd.errors.ParserError) as e:
+        logger.warning("Unable to read seed speaker aliases from %s: %s", path, e)
+        return {}
+
+    result = {}
+    for row in seed.itertuples(index=False):
+        alias_key = speaker_identity_key(row.alias)
         speaker_id = str(row.speaker_id).strip()
         canonical_name = str(row.canonical_name).strip()
         if alias_key and speaker_id and canonical_name:
@@ -1869,7 +1892,10 @@ def main():
     dashboard = get_dashboard_data(URLNAME)
     df_up = dashboard["df_up"]
     df_past = dashboard["df_past"]
-    speaker_aliases = load_speaker_aliases(SPEAKER_OVERRIDES_PATH)
+    speaker_aliases = {
+        **load_seed_speaker_aliases(),
+        **load_speaker_aliases(SPEAKER_OVERRIDES_PATH),
+    }
     member_count = dashboard["member_count"]
     pulse_source = dashboard["source"]
     pulse_saved_at = dashboard["saved_at"]
